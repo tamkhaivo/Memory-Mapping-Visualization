@@ -1,0 +1,76 @@
+cmake_minimum_required(VERSION 3.28)
+project(MemoryMapper VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# --- Policies ---
+cmake_policy(SET CMP0167 NEW)
+
+# --- Sanitizer presets ---
+include(cmake/Sanitizers.cmake)
+
+# --- Dependencies ---
+find_package(Boost 1.83 REQUIRED CONFIG)
+find_package(nlohmann_json 3.11 REQUIRED)
+find_package(GTest REQUIRED)
+find_package(benchmark REQUIRED)
+
+# --- Main library (allocator + tracker + server) ---
+add_library(memory_mapper_lib STATIC
+    src/allocator/arena.cpp
+    src/allocator/free_list.cpp
+    src/tracker/tracker.cpp
+    src/server/ws_server.cpp
+)
+
+target_include_directories(memory_mapper_lib PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(memory_mapper_lib PUBLIC
+    Boost::headers
+    nlohmann_json::nlohmann_json
+)
+
+# --- Main executable ---
+add_executable(memory_mapper src/main.cpp)
+target_link_libraries(memory_mapper PRIVATE memory_mapper_lib)
+
+# --- Tests ---
+enable_testing()
+
+add_executable(memory_mapper_tests
+    tests/test_arena.cpp
+    tests/test_free_list.cpp
+    tests/test_tracker.cpp
+)
+
+target_link_libraries(memory_mapper_tests PRIVATE
+    memory_mapper_lib
+    GTest::gtest_main
+)
+
+include(GoogleTest)
+gtest_discover_tests(memory_mapper_tests)
+
+# --- Benchmarks ---
+add_executable(memory_mapper_bench
+    bench/bench_allocator.cpp
+)
+
+target_link_libraries(memory_mapper_bench PRIVATE
+    memory_mapper_lib
+    benchmark::benchmark
+    benchmark::benchmark_main
+)
+
+# --- Copy web assets to build directory ---
+add_custom_command(TARGET memory_mapper POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/web
+        $<TARGET_FILE_DIR:memory_mapper>/web
+    COMMENT "Copying web assets to build directory"
+)

@@ -1,0 +1,45 @@
+# ─── Build artifacts ─────────────────────────────────────────────
+build/
+cmake-build-*/
+out/
+.cache/
+
+# ─── Compiled objects ────────────────────────────────────────────
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# ─── IDE / Editor ────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ─── CMake generated ─────────────────────────────────────────────
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# ─── Dependency managers ─────────────────────────────────────────
+_deps/
+vcpkg_installed/
+
+# ─── Testing / profiling ─────────────────────────────────────────
+Testing/
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+
+# ─── Gemini / agent artifacts ────────────────────────────────────
+.gemini/
+.agent/
+GEMINI.md
