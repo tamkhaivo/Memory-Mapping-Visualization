@@ -13,13 +13,19 @@ flowchart LR
         D -->|"AllocationEvent"| E["JSON Serializer"]
         E --> F["WebSocket Server<br/>(Boost.Beast)"]
     end
+    subgraph "Interface Layer"
+        VA["VisualizationArena<br/>(façade)"] --> A
+        VA --> CA["CacheAnalyzer"]
+        VA --> PI["PaddingInspector"]
+    end
     subgraph "Browser Frontend"
         F -->|"ws://localhost:8080"| G["app.js<br/>(Canvas Renderer)"]
         G --> H["Memory Map"]
         G --> I["Stats Panel"]
         G --> J["Event Timeline"]
     end
-    C -->|"allocate/deallocate"| K["Test Program"]
+    VA -->|"alloc/dealloc"| K["C++ Application"]
+    C -->|"allocate/deallocate"| K
 ```
 
 ### Data Flow
@@ -98,7 +104,7 @@ Click **"Heatmap: OFF"** in the legend to toggle the allocation heatmap. Frequen
 - **⬆ Import**: Loads a previously exported JSON event log
 - **▶ Replay**: Plays back imported events at 4× speed with visual animation. Click **⏹ Stop** to abort.
 
-### Use as a Library
+### Use as a Library (Low-Level)
 
 ```cpp
 #include "allocator/arena.hpp"
@@ -116,6 +122,74 @@ std::pmr::vector<int> vec{&resource};
 vec.push_back(42);
 ```
 
+### Use as a Library (VisualizationArena Façade)
+
+The `VisualizationArena` wraps the entire pipeline into a single object:
+
+```cpp
+#include "interface/visualization_arena.hpp"
+#include "interface/padding_inspector.hpp"
+
+// Create a 1 MB arena with auto-detected cache-line size
+auto arena = mmap_viz::VisualizationArena::create({
+    .arena_size = 1024 * 1024,
+}).value();
+
+// Typed allocation
+int* p = arena.alloc<int>("counter", 42);
+double* d = arena.alloc<double>("weight", 3.14);
+
+// Raw allocation
+void* buf = arena.alloc_raw(256, 64, "io_buffer");
+
+// PMR interop
+std::pmr::vector<int> vec{arena.resource()};
+vec.push_back(10);
+
+// --- Diagnostics ---
+
+// Padding waste analysis
+auto pad = arena.padding_report();
+std::cout << "Efficiency: " << pad.efficiency * 100 << "%\n";
+
+// Cache-line utilization
+auto cache = arena.cache_report();
+std::cout << "Avg utilization: " << cache.avg_utilization * 100 << "%\n";
+std::cout << "Split allocations: " << cache.split_allocations << "\n";
+
+// JSON export
+auto json = arena.snapshot_json();
+
+// Cleanup
+arena.dealloc(p);
+arena.dealloc(d);
+arena.dealloc_raw(buf, 256);
+```
+
+### Struct Layout Inspection
+
+Analyze struct padding at compile time with `MMAP_VIZ_INSPECT`:
+
+```cpp
+struct Particle {
+    char type;       // 1 byte
+    double x, y, z;  // 24 bytes — but 7 bytes padding after type!
+    int id;          // 4 bytes
+};
+
+auto info = MMAP_VIZ_INSPECT(Particle, type, x, y, z, id);
+std::cout << "Size: " << info.total_size << "B, "
+          << "Useful: " << info.useful_bytes << "B, "
+          << "Padding: " << info.padding_bytes << "B, "
+          << "Efficiency: " << info.efficiency * 100 << "%\n";
+
+for (const auto& f : info.fields) {
+    std::cout << "  " << f.name << ": offset=" << f.offset
+              << " size=" << f.size
+              << " padding_before=" << f.padding_before << "\n";
+}
+```
+
 ## Project Structure
 
 ```
@@ -130,6 +204,10 @@ Memory-Mapping-Visualization/
 │   │   ├── arena.hpp/cpp       # RAII mmap wrapper
 │   │   ├── free_list.hpp/cpp   # First-fit free-list allocator
 │   │   └── tracked_resource.hpp # std::pmr::memory_resource bridge
+│   ├── interface/
+│   │   ├── visualization_arena.hpp/cpp  # Single-entry-point façade
+│   │   ├── cache_analyzer.hpp/cpp       # Cache-line utilization analyzer
+│   │   └── padding_inspector.hpp        # Padding waste + struct layout
 │   ├── tracker/
 │   │   ├── block_metadata.hpp  # BlockMetadata, AllocationEvent
 │   │   └── tracker.hpp/cpp     # Out-of-band allocation tracker
@@ -143,9 +221,11 @@ Memory-Mapping-Visualization/
 │   ├── style.css               # Dark-theme styling
 │   └── app.js                  # Canvas renderer + WebSocket client
 ├── tests/
-│   ├── test_arena.cpp          # Arena unit tests (7 tests)
-│   ├── test_free_list.cpp      # FreeList unit tests (11 tests)
-│   └── test_tracker.cpp        # Tracker unit tests (6 tests)
+│   ├── test_arena.cpp                 # Arena unit tests (7 tests)
+│   ├── test_free_list.cpp             # FreeList unit tests (11 tests)
+│   ├── test_tracker.cpp               # Tracker unit tests (6 tests)
+│   ├── test_visualization_arena.cpp   # Façade unit tests (16 tests)
+│   └── test_cache_analyzer.cpp        # Cache analyzer tests (11 tests)
 └── bench/
     └── bench_allocator.cpp     # Micro-benchmarks
 ```
@@ -170,6 +250,40 @@ cd build && ctest --output-on-failure
 | Server port | 8080 | `main.cpp:kPort` |
 | Demo delay | 250–500ms | `run_demo()` sleep calls |
 | Max timeline events | 200 | `app.js:MAX_TIMELINE_EVENTS` |
+
+## Server Simulation
+
+A standalone simulation tool (`server_sim`) puts the `VisualizationArena` under high-bandwidth load to test performance and visualization stability.
+
+### Usage
+
+```bash
+./build/server_sim [options]
+```
+
+**Options:**
+- `--requests <N>`: Total requests to simulate (default: 1000).
+- `--pattern <P>`: Traffic pattern (`steady`, `burst`, `ramp`, `mixed`).
+- `--arena-mb <N>`: Arena size in MB (default: 4).
+- `--server`: Enable the WebSocket visualization server (connect browser to `localhost:8080`).
+- `--port <N>`: WebSocket port (default: 8080).
+
+### Example
+
+Simulate 5,000 mixed requests with live visualization:
+
+```bash
+./build/server_sim --requests 5000 --pattern mixed --server
+```
+
+Open `http://localhost:8080` in your browser to watch the memory churn in real-time.
+
+### Traffic Patterns
+
+- **Steady**: Constant request rate (good for baseline).
+- **Burst**: Intense batches of requests followed by cooldowns (tests recovery).
+- **Ramp**: Linearly increasing load (finds breaking points).
+- **Mixed**: Alternating user-like behavior (realistic stress test).
 
 ## License
 

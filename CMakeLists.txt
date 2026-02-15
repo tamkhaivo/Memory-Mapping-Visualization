@@ -24,6 +24,8 @@ add_library(memory_mapper_lib STATIC
     src/allocator/free_list.cpp
     src/tracker/tracker.cpp
     src/server/ws_server.cpp
+    src/interface/visualization_arena.cpp
+    src/interface/cache_analyzer.cpp
 )
 
 target_include_directories(memory_mapper_lib PUBLIC
@@ -39,6 +41,14 @@ target_link_libraries(memory_mapper_lib PUBLIC
 add_executable(memory_mapper src/main.cpp)
 target_link_libraries(memory_mapper PRIVATE memory_mapper_lib)
 
+# --- Server simulation executable ---
+add_executable(server_sim
+    src/simulation/sim_main.cpp
+    src/simulation/server_sim.cpp
+    src/simulation/request_generator.cpp
+)
+target_link_libraries(server_sim PRIVATE memory_mapper_lib)
+
 # --- Tests ---
 enable_testing()
 
@@ -46,6 +56,8 @@ add_executable(memory_mapper_tests
     tests/test_arena.cpp
     tests/test_free_list.cpp
     tests/test_tracker.cpp
+    tests/test_visualization_arena.cpp
+    tests/test_cache_analyzer.cpp
 )
 
 target_link_libraries(memory_mapper_tests PRIVATE
