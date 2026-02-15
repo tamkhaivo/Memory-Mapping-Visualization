@@ -285,6 +285,22 @@ Open `http://localhost:8080` in your browser to watch the memory churn in real-t
 - **Ramp**: Linearly increasing load (finds breaking points).
 - **Mixed**: Alternating user-like behavior (realistic stress test).
 
+### High-Performance Testing (Sampling)
+
+To simulate loads **>10k req/s**, use event sampling to reduce visualization overhead (JSON serialization + network IO).
+
+```bash
+# Run 1M requests at full speed, visualizing 1 in 1000 events
+./build/server_sim --requests 1000000 --interval-us 0 --sampling 1000 --server
+```
+
+**Sampling Strategy:**
+- `--sampling 1`: Visualize every event (max ~6k req/s).
+- `--sampling 100`: Visualize 1% (max ~40k req/s).
+- `--sampling 1000`: Visualize 0.1% (max ~150k req/s).
+
+*Note: Without sampling, the visualization pipeline limits throughput regardless of backend speed.*
+
 ## License
 
 See [LICENSE](LICENSE).
