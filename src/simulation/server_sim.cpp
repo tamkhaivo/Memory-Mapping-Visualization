@@ -54,15 +54,15 @@ auto ServerSim::response_size_for(const Request &req) const -> std::size_t {
 auto ServerSim::handle_request(const Request &req) -> Response {
   using Clock = std::chrono::steady_clock;
   const auto t0 = Clock::now();
-
-  // Build arena tag: "GET /api/data #42"
-  std::string tag = std::string{to_string(req.type)} + " " + req.endpoint +
-                    " #" + std::to_string(req.id);
+  char tag_buf[128];
 
   // 1. Allocate request buffer (simulates receiving payload).
   void *req_buf = nullptr;
   if (req.payload_size > 0) {
-    req_buf = arena_.alloc_raw(req.payload_size, 16, tag + " [req]");
+    std::snprintf(tag_buf, sizeof(tag_buf), "%s %s #%llu [req]",
+                  to_string(req.type), req.endpoint.c_str(),
+                  static_cast<unsigned long long>(req.id));
+    req_buf = arena_.alloc_raw(req.payload_size, 16, tag_buf);
     if (req_buf == nullptr) {
       // Arena OOM — record failure.
       const auto latency = Clock::now() - t0;
@@ -79,7 +79,10 @@ auto ServerSim::handle_request(const Request &req) -> Response {
 
   // 2. Allocate response buffer.
   auto resp_size = response_size_for(req);
-  void *resp_buf = arena_.alloc_raw(resp_size, 16, tag + " [resp]");
+  std::snprintf(tag_buf, sizeof(tag_buf), "%s %s #%llu [resp]",
+                to_string(req.type), req.endpoint.c_str(),
+                static_cast<unsigned long long>(req.id));
+  void *resp_buf = arena_.alloc_raw(resp_size, 16, tag_buf);
   if (resp_buf == nullptr) {
     // Free request buffer if allocated, then fail.
     if (req_buf != nullptr) {

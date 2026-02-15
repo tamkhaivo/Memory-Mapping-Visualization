@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
-#include <mutex>
 #include <vector>
 
 namespace mmap_viz::sim {
@@ -76,18 +75,6 @@ public:
 
   MetricsCollector() = default;
 
-  /// @brief Start the wall-clock timer.
-  void start() {
-    std::lock_guard lock(mu_);
-    start_time_ = Clock::now();
-  }
-
-  /// @brief Stop the wall-clock timer.
-  void stop() {
-    std::lock_guard lock(mu_);
-    end_time_ = Clock::now();
-  }
-
   /// @brief Record a single request outcome.
   /// @param latency   Request processing duration.
   /// @param req_bytes Inbound payload size.
@@ -95,7 +82,7 @@ public:
   /// @param success   True if the request succeeded.
   void record(Duration latency, std::size_t req_bytes, std::size_t resp_bytes,
               bool success) {
-    std::lock_guard lock(mu_);
+    // Single-threaded simulation: no lock needed.
     const auto us = std::chrono::duration<double, std::micro>(latency).count();
     latencies_.push_back(us);
     bytes_in_ += req_bytes;
@@ -109,8 +96,6 @@ public:
 
   /// @brief Compute a snapshot with percentiles.
   [[nodiscard]] auto snapshot() const -> RequestMetrics {
-    std::lock_guard lock(mu_);
-
     RequestMetrics m;
     m.successful = ok_;
     m.failed = fail_;
@@ -152,15 +137,20 @@ public:
 
   /// @brief Reset all counters.
   void reset() {
-    std::lock_guard lock(mu_);
     latencies_.clear();
     bytes_in_ = bytes_out_ = 0;
     ok_ = fail_ = 0;
     start_time_ = end_time_ = Clock::time_point{};
   }
 
+  /// @brief Start the wall-clock timer.
+  void start() { start_time_ = Clock::now(); }
+
+  /// @brief Stop the wall-clock timer.
+  void stop() { end_time_ = Clock::now(); }
+
 private:
-  mutable std::mutex mu_;
+  // mutable std::mutex mu_; // Removed for performance
   std::vector<double> latencies_;
   std::size_t bytes_in_ = 0;
   std::size_t bytes_out_ = 0;
