@@ -143,6 +143,16 @@ function connect() {
 // ─── Message Handling ───────────────────────────────────────────
 
 function handleMessage(data) {
+    if (Array.isArray(data)) {
+        for (const item of data) {
+            processEvent(item);
+        }
+    } else {
+        processEvent(data);
+    }
+}
+
+function processEvent(data) {
     if (data.type === 'snapshot') {
         handleSnapshot(data);
     } else if (data.type === 'allocate') {

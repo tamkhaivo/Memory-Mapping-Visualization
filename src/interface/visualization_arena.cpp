@@ -38,12 +38,15 @@ auto VisualizationArena::create(ArenaConfig cfg)
   // 5. Build tracker (optionally with server broadcast callback).
   if (cfg.enable_server) {
     va.server_ = std::make_unique<WsServer>(cfg.port, cfg.web_root, nullptr);
+    va.batcher_ = std::make_shared<Batcher>();
 
+    // Capture shared_ptr to batcher, ensuring validity even if va moves/dies
+    // (though va must live for server)
     va.tracker_ = std::make_unique<AllocationTracker>(
-        *va.allocator_,
-        [server = va.server_.get()](const AllocationEvent &evt) {
+        *va.allocator_, [batcher = va.batcher_](const AllocationEvent &evt) {
           nlohmann::json j = evt;
-          server->broadcast(j.dump());
+          std::lock_guard lock(batcher->mutex);
+          batcher->events.push_back(j.dump());
         });
 
     // Wire up snapshot provider.
@@ -60,6 +63,36 @@ auto VisualizationArena::create(ArenaConfig cfg)
 
     // Start server in background thread.
     std::thread([server = va.server_.get()]() { server->run(); }).detach();
+
+    // Start batch flusher thread (approx 60Hz).
+    // Capture shared_ptr to batcher and raw pointer to server (server owned by
+    // generic va life)
+    std::thread([batcher = va.batcher_, server = va.server_.get()]() {
+      while (true) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+
+        // simple flush logic
+        std::vector<std::string> batch;
+        {
+          std::lock_guard lock(batcher->mutex);
+          if (batcher->events.empty())
+            continue;
+          batch.swap(batcher->events);
+        }
+
+        if (server) { // server pointer valid as long as main thread runs
+          std::string payload = "[";
+          for (size_t i = 0; i < batch.size(); ++i) {
+            payload += batch[i];
+            if (i < batch.size() - 1)
+              payload += ",";
+          }
+          payload += "]";
+          server->broadcast(payload);
+        }
+      }
+    }).detach();
+
   } else {
     va.tracker_ = std::make_unique<AllocationTracker>(*va.allocator_);
   }
@@ -82,7 +115,8 @@ VisualizationArena::VisualizationArena(VisualizationArena &&other) noexcept
       tracker_{std::move(other.tracker_)},
       resource_{std::move(other.resource_)},
       cache_analyzer_{other.cache_analyzer_}, server_{std::move(other.server_)},
-      alloc_sizes_{std::move(other.alloc_sizes_)} {}
+      alloc_sizes_{std::move(other.alloc_sizes_)},
+      batcher_{std::move(other.batcher_)} {}
 
 VisualizationArena &
 VisualizationArena::operator=(VisualizationArena &&other) noexcept {
@@ -90,6 +124,9 @@ VisualizationArena::operator=(VisualizationArena &&other) noexcept {
     if (server_) {
       server_->stop();
     }
+    // No need to lock mutexes for shared_ptr move, just move the pointer.
+    // The underlying Batcher object stays valid for any existing references.
+
     arena_ = std::move(other.arena_);
     allocator_ = std::move(other.allocator_);
     tracker_ = std::move(other.tracker_);
@@ -97,6 +134,7 @@ VisualizationArena::operator=(VisualizationArena &&other) noexcept {
     cache_analyzer_ = other.cache_analyzer_;
     server_ = std::move(other.server_);
     alloc_sizes_ = std::move(other.alloc_sizes_);
+    batcher_ = std::move(other.batcher_);
   }
   return *this;
 }

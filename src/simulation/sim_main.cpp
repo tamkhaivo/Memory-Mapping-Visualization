@@ -30,6 +30,7 @@ struct SimArgs {
   unsigned short port = 8080;
   std::size_t burst_size = 50;
   bool show_progress = true;
+  std::size_t interval_us = 100; // Default 100us
 };
 
 void print_usage(const char *prog) {
@@ -41,6 +42,8 @@ void print_usage(const char *prog) {
       << "  --pattern <P>        Traffic pattern: steady|burst|ramp|mixed "
          "(default: mixed)\n"
       << "  --burst-size <N>     Requests per burst (default: 50)\n"
+      << "  --interval-us <N>    Request interval in microseconds (default: "
+         "100)\n"
       << "  --server             Enable WebSocket visualization server\n"
       << "  --port <N>           Server port (default: 8080)\n"
       << "  --no-progress        Disable progress output\n"
@@ -86,6 +89,8 @@ auto parse_args(int argc, char *argv[]) -> SimArgs {
       args.pattern = parse_pattern(argv[++i]);
     } else if (arg == "--burst-size" && i + 1 < argc) {
       args.burst_size = std::stoull(argv[++i]);
+    } else if (arg == "--interval-us" && i + 1 < argc) {
+      args.interval_us = std::stoull(argv[++i]);
     } else if (arg == "--server") {
       args.enable_server = true;
     } else if (arg == "--port" && i + 1 < argc) {
@@ -195,18 +200,28 @@ int main(int argc, char *argv[]) {
   // 2. Create the server.
   ServerSim server{arena};
 
+  struct SimArgs {
+    // ...
+    std::size_t interval_us = 100; // Default 100us
+  };
+
+  // ... in print_usage ...
+  // << "  --interval-us <N>    Request interval in microseconds (default:
+  // 100)\n"
+
+  // ... in parse_args ...
+  // else if (arg == "--interval-us" && i + 1 < argc) {
+  //   args.interval_us = std::stoull(argv[++i]);
+  // }
+
+  // ... in main ...
   // 3. Create the request generator.
   RequestGenerator generator{{
       .pattern = args.pattern,
       .total_requests = args.requests,
+      .steady_interval = std::chrono::microseconds(args.interval_us),
       .burst_size = args.burst_size,
   }};
-
-  // 4. Optional: short delay for WebSocket clients to connect.
-  if (args.enable_server) {
-    std::cout << "  Waiting 2s for clients to connect...\n\n";
-    std::this_thread::sleep_for(std::chrono::seconds(2));
-  }
 
   // 5. Run the simulation.
   std::size_t progress_interval = std::max<std::size_t>(1, args.requests / 20);

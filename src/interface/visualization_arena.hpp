@@ -158,6 +158,12 @@ public:
 private:
   VisualizationArena() = default;
 
+  struct Batcher {
+    std::mutex mutex;
+    std::vector<std::string> events;
+  };
+  std::shared_ptr<Batcher> batcher_;
+
   // unique_ptr gives the Arena a stable address so FreeListAllocator can
   // hold a reference to it even if VisualizationArena moves.
   std::unique_ptr<Arena> arena_;
