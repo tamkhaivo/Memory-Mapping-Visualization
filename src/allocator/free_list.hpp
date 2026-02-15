@@ -88,22 +88,47 @@ public:
   [[nodiscard]] auto capacity() const noexcept -> std::size_t;
 
 private:
-  /// @brief Intrusive free-block header stored within free regions.
+  enum class Color : bool { Red, Black };
+
+  /// @brief Intrusive Red-Black Tree Node stored within free regions.
   struct FreeBlock {
-    std::size_t size; ///< Total size of this free block (including header).
-    FreeBlock *next;  ///< Next free block in the list, or nullptr.
+    std::size_t size;        ///< Size of this block.
+    FreeBlock *parent;       ///< Parent node.
+    FreeBlock *left;         ///< Left child (lower addresses).
+    FreeBlock *right;        ///< Right child (higher addresses).
+    std::size_t subtree_max; ///< Max block size in this subtree.
+    Color color;             ///< RB Color.
   };
 
+  /// @brief Minimum size required to store a FreeBlock header.
   static constexpr std::size_t kMinBlockSize = sizeof(FreeBlock);
 
-  Arena &arena_;
-  FreeBlock *head_ = nullptr;
-  std::size_t allocated_ = 0;
+  // --- RB Tree Helpers ---
+  void insert_node(FreeBlock *z);
+  void delete_node(FreeBlock *z);
+  void rb_transplant(FreeBlock *u, FreeBlock *v);
+  void rb_insert_fixup(FreeBlock *z);
+  void rb_delete_fixup(FreeBlock *x);
+  void left_rotate(FreeBlock *x);
+  void right_rotate(FreeBlock *x);
 
-  // O(1) stats cache
+  /// @brief Updates subtree_max for x and its ancestors.
+  void update_max(FreeBlock *x);
+
+  /// @brief Finds the first block in address order that fits the size.
+  [[nodiscard]] auto find_first_fit(std::size_t size) const -> FreeBlock *;
+
+  [[nodiscard]] auto minimum(FreeBlock *x) const -> FreeBlock *;
+  [[nodiscard]] auto maximum(FreeBlock *x) const -> FreeBlock *;
+  [[nodiscard]] auto predecessor(FreeBlock *x) const -> FreeBlock *;
+  [[nodiscard]] auto successor(FreeBlock *x) const -> FreeBlock *;
+
+  Arena &arena_;
+  FreeBlock *root_ = nullptr; ///< Root of the address-ordered RB tree.
+  FreeBlock *nil_;            ///< Sentinel node for leaves.
+
+  std::size_t allocated_ = 0;
   std::size_t free_blocks_ = 0;
-  mutable std::size_t largest_free_ = 0;
-  mutable bool largest_free_dirty_ = true;
 };
 
 } // namespace mmap_viz
