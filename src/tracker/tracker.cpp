@@ -12,7 +12,7 @@ AllocationTracker::AllocationTracker(FreeListAllocator &allocator,
                                      std::size_t sampling,
                                      EventCallback callback) noexcept
     : allocator_{allocator}, callback_{std::move(callback)},
-      sampling_{sampling > 0 ? sampling : 1} {}
+      sampling_{sampling > 0 ? sampling : 1}, pool_{}, active_blocks_{&pool_} {}
 
 auto AllocationTracker::make_event(EventType type, BlockMetadata block)
     -> AllocationEvent {

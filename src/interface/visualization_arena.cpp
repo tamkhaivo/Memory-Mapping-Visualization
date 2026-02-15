@@ -117,9 +117,7 @@ VisualizationArena::~VisualizationArena() {
 VisualizationArena::VisualizationArena(VisualizationArena &&other) noexcept
     : arena_{std::move(other.arena_)}, allocator_{std::move(other.allocator_)},
       tracker_{std::move(other.tracker_)},
-      resource_{std::move(other.resource_)},
-      cache_analyzer_{other.cache_analyzer_}, server_{std::move(other.server_)},
-      alloc_sizes_{std::move(other.alloc_sizes_)},
+      resource_{std::move(other.resource_)}, server_{std::move(other.server_)},
       batcher_{std::move(other.batcher_)} {}
 
 VisualizationArena &
@@ -137,7 +135,6 @@ VisualizationArena::operator=(VisualizationArena &&other) noexcept {
     resource_ = std::move(other.resource_);
     cache_analyzer_ = other.cache_analyzer_;
     server_ = std::move(other.server_);
-    alloc_sizes_ = std::move(other.alloc_sizes_);
     batcher_ = std::move(other.batcher_);
   }
   return *this;
@@ -169,11 +166,6 @@ auto VisualizationArena::alloc_raw(std::size_t size, std::size_t alignment,
   meta.set_tag(tag);
   tracker_->record_alloc(std::move(meta));
 
-  {
-    std::lock_guard lock(diag_mutex_);
-    alloc_sizes_[result->ptr] = size;
-  }
-
   return result->ptr;
 }
 
@@ -194,11 +186,6 @@ void VisualizationArena::dealloc_raw(void *ptr, std::size_t size) {
       (event.block.actual_size > 0) ? event.block.actual_size : size;
 
   (void)allocator_->deallocate(byte_ptr, dealloc_size);
-
-  {
-    std::lock_guard lock(diag_mutex_);
-    alloc_sizes_.erase(ptr);
-  }
 }
 
 // ─── PMR interop ─────────────────────────────────────────────────────────

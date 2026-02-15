@@ -29,7 +29,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <unordered_map>
 #include <utility>
 
 namespace mmap_viz {
@@ -175,12 +174,6 @@ private:
 
   // Optional server (heap-allocated to avoid pulling in Boost headers).
   std::unique_ptr<WsServer> server_;
-
-  // Track raw alloc sizes for typed dealloc (ptr → size mapping).
-  std::unordered_map<void *, std::size_t> alloc_sizes_;
-
-  // Protects alloc_sizes_ and diagnostic queries.
-  mutable std::mutex diag_mutex_;
 };
 
 } // namespace mmap_viz

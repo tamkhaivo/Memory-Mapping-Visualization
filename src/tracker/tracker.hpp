@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <functional>
 #include <map>
+#include <memory_resource>
 #include <unordered_map>
 #include <vector>
 
@@ -58,7 +59,8 @@ private:
   auto make_event(EventType type, BlockMetadata block) -> AllocationEvent;
 
   FreeListAllocator &allocator_;
-  std::unordered_map<std::size_t, BlockMetadata>
+  std::pmr::unsynchronized_pool_resource pool_;
+  std::pmr::unordered_map<std::size_t, BlockMetadata>
       active_blocks_; ///< Keyed by offset.
   std::vector<AllocationEvent> event_log_;
   EventCallback callback_;
