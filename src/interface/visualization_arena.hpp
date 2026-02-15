@@ -44,6 +44,7 @@ struct ArenaConfig {
   bool enable_server = false;           ///< Start WebSocket server.
   unsigned short port = 8080;           ///< Server port (if enabled).
   std::string web_root = "web";         ///< Static file root (if enabled).
+  std::size_t sampling = 1; ///< Event sampling rate (1 = all events).
 };
 
 /// @brief Single-object façade wrapping the entire instrumented allocation

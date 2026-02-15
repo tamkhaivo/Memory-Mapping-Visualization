@@ -16,7 +16,7 @@ protected:
     ASSERT_TRUE(result.has_value());
     arena_ = std::make_unique<Arena>(std::move(*result));
     alloc_ = std::make_unique<FreeListAllocator>(*arena_);
-    tracker_ = std::make_unique<AllocationTracker>(*alloc_);
+    tracker_ = std::make_unique<AllocationTracker>(*alloc_, 1);
   }
 
   static constexpr std::size_t kArenaSize = 64 * 1024;

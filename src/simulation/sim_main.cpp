@@ -14,6 +14,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -31,6 +32,7 @@ struct SimArgs {
   std::size_t burst_size = 50;
   bool show_progress = true;
   std::size_t interval_us = 100; // Default 100us
+  std::size_t sampling = 1;      // Default 1 (no sampling)
 };
 
 void print_usage(const char *prog) {
@@ -44,6 +46,7 @@ void print_usage(const char *prog) {
       << "  --burst-size <N>     Requests per burst (default: 50)\n"
       << "  --interval-us <N>    Request interval in microseconds (default: "
          "100)\n"
+      << "  --sampling <N>       Event sampling rate (default: 1)\n"
       << "  --server             Enable WebSocket visualization server\n"
       << "  --port <N>           Server port (default: 8080)\n"
       << "  --no-progress        Disable progress output\n"
@@ -91,6 +94,8 @@ auto parse_args(int argc, char *argv[]) -> SimArgs {
       args.burst_size = std::stoull(argv[++i]);
     } else if (arg == "--interval-us" && i + 1 < argc) {
       args.interval_us = std::stoull(argv[++i]);
+    } else if (arg == "--sampling" && i + 1 < argc) {
+      args.sampling = std::stoull(argv[++i]);
     } else if (arg == "--server") {
       args.enable_server = true;
     } else if (arg == "--port" && i + 1 < argc) {
@@ -167,7 +172,7 @@ void print_report(const RequestMetrics &m, const VisualizationArena &arena) {
 
 } // namespace
 
-// ─── main ───────────────────────────────────────────────────────────────
+// ─── Main ───────────────────────────────────────────────────────────────
 
 int main(int argc, char *argv[]) {
   auto args = parse_args(argc, argv);
@@ -179,6 +184,9 @@ int main(int argc, char *argv[]) {
 
   if (args.enable_server) {
     std::cout << "  Server:     http://localhost:" << args.port << '\n';
+    if (args.sampling > 1) {
+      std::cout << "  Sampling:   1/" << args.sampling << " events\n";
+    }
   }
   std::cout << '\n';
 
@@ -187,6 +195,7 @@ int main(int argc, char *argv[]) {
       .arena_size = args.arena_mb * 1024 * 1024,
       .enable_server = args.enable_server,
       .port = args.port,
+      .sampling = args.sampling,
   });
 
   if (!arena_result.has_value()) {
@@ -200,21 +209,6 @@ int main(int argc, char *argv[]) {
   // 2. Create the server.
   ServerSim server{arena};
 
-  struct SimArgs {
-    // ...
-    std::size_t interval_us = 100; // Default 100us
-  };
-
-  // ... in print_usage ...
-  // << "  --interval-us <N>    Request interval in microseconds (default:
-  // 100)\n"
-
-  // ... in parse_args ...
-  // else if (arg == "--interval-us" && i + 1 < argc) {
-  //   args.interval_us = std::stoull(argv[++i]);
-  // }
-
-  // ... in main ...
   // 3. Create the request generator.
   RequestGenerator generator{{
       .pattern = args.pattern,

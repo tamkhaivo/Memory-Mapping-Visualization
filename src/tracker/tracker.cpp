@@ -7,8 +7,10 @@
 namespace mmap_viz {
 
 AllocationTracker::AllocationTracker(FreeListAllocator &allocator,
+                                     std::size_t sampling,
                                      EventCallback callback) noexcept
-    : allocator_{allocator}, callback_{std::move(callback)} {}
+    : allocator_{allocator}, callback_{std::move(callback)},
+      sampling_{sampling > 0 ? sampling : 1} {}
 
 auto AllocationTracker::make_event(EventType type, BlockMetadata block)
     -> AllocationEvent {
@@ -27,7 +29,7 @@ auto AllocationTracker::make_event(EventType type, BlockMetadata block)
   AllocationEvent event{
       .type = type,
       .block = std::move(block),
-      .event_id = next_event_id_++,
+      .event_id = next_event_id_,
       .total_allocated = allocator_.bytes_allocated(),
       .total_free = total_free,
       .fragmentation_pct = frag_pct,
@@ -39,9 +41,16 @@ auto AllocationTracker::make_event(EventType type, BlockMetadata block)
 
 auto AllocationTracker::record_alloc(BlockMetadata block) -> AllocationEvent {
   auto offset = block.offset;
-  auto event = make_event(EventType::Allocate, block);
 
-  active_blocks_.emplace(offset, std::move(block));
+  // Always track active blocks for dealloc lookup.
+  active_blocks_.emplace(offset, block); // Copy block for map
+
+  // Sampling check.
+  if (++next_event_id_ % sampling_ != 0) {
+    return {}; // Return empty event if not sampled.
+  }
+
+  auto event = make_event(EventType::Allocate, std::move(block));
   event_log_.push_back(event);
 
   if (callback_) {
@@ -59,11 +68,16 @@ auto AllocationTracker::record_dealloc(std::size_t offset) -> AllocationEvent {
     block = std::move(it->second);
     active_blocks_.erase(it);
   } else {
-    // Unknown block — still record the event with minimal info.
+    // Untracked block or double free.
     block.offset = offset;
   }
 
-  auto event = make_event(EventType::Deallocate, block);
+  // Sampling check.
+  if (++next_event_id_ % sampling_ != 0) {
+    return {};
+  }
+
+  auto event = make_event(EventType::Deallocate, std::move(block));
   event_log_.push_back(event);
 
   if (callback_) {

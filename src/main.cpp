@@ -277,7 +277,8 @@ int main(int argc, char *argv[]) {
 
   WsServer server{kPort, web_root, nullptr};
 
-  AllocationTracker tracker{allocator, [&server](const AllocationEvent &event) {
+  AllocationTracker tracker{allocator, 1,
+                            [&server](const AllocationEvent &event) {
                               nlohmann::json j = event;
                               server.broadcast(j.dump());
                             }};

@@ -43,7 +43,8 @@ auto VisualizationArena::create(ArenaConfig cfg)
     // Capture shared_ptr to batcher, ensuring validity even if va moves/dies
     // (though va must live for server)
     va.tracker_ = std::make_unique<AllocationTracker>(
-        *va.allocator_, [batcher = va.batcher_](const AllocationEvent &evt) {
+        *va.allocator_, cfg.sampling,
+        [batcher = va.batcher_](const AllocationEvent &evt) {
           nlohmann::json j = evt;
           std::lock_guard lock(batcher->mutex);
           batcher->events.push_back(j.dump());
@@ -94,7 +95,8 @@ auto VisualizationArena::create(ArenaConfig cfg)
     }).detach();
 
   } else {
-    va.tracker_ = std::make_unique<AllocationTracker>(*va.allocator_);
+    va.tracker_ =
+        std::make_unique<AllocationTracker>(*va.allocator_, cfg.sampling);
   }
 
   // 6. Build the PMR resource bridge.

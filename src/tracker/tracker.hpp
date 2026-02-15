@@ -26,18 +26,19 @@ class AllocationTracker {
 public:
   /// @brief Construct a tracker for the given allocator.
   /// @param allocator Reference to the backing FreeListAllocator.
-  /// @param callback  Optional callback invoked on each alloc/dealloc event.
-  explicit AllocationTracker(FreeListAllocator &allocator,
+  /// @param sampling  Event sampling rate (1 = track all, N = track 1/N).
+  /// @param callback  Optional callback invoked on each sampled event.
+  explicit AllocationTracker(FreeListAllocator &allocator, std::size_t sampling,
                              EventCallback callback = nullptr) noexcept;
 
   /// @brief Record an allocation event.
   /// @param block Metadata for the newly allocated block.
-  /// @return The generated AllocationEvent.
+  /// @return The generated AllocationEvent (empty if not sampled).
   auto record_alloc(BlockMetadata block) -> AllocationEvent;
 
   /// @brief Record a deallocation event.
   /// @param offset Offset of the block being freed.
-  /// @return The generated AllocationEvent, or empty if offset not found.
+  /// @return The generated AllocationEvent (empty if not sampled).
   auto record_dealloc(std::size_t offset) -> AllocationEvent;
 
   /// @brief Current snapshot of all active (allocated) blocks.
@@ -56,9 +57,11 @@ private:
   auto make_event(EventType type, BlockMetadata block) -> AllocationEvent;
 
   FreeListAllocator &allocator_;
-  std::map<std::size_t, BlockMetadata> active_blocks_; ///< Keyed by offset.
+  std::unordered_map<std::size_t, BlockMetadata>
+      active_blocks_; ///< Keyed by offset.
   std::vector<AllocationEvent> event_log_;
   EventCallback callback_;
+  std::size_t sampling_;
   std::size_t next_event_id_ = 0;
 };
 
