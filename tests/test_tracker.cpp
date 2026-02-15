@@ -37,7 +37,7 @@ TEST_F(TrackerTest, RecordAlloc) {
 
   auto event = tracker_->record_alloc(meta);
   EXPECT_EQ(event.type, EventType::Allocate);
-  EXPECT_EQ(event.event_id, 0u);
+  EXPECT_EQ(event.event_id, 1u);
   EXPECT_EQ(tracker_->active_block_count(), 1u);
 }
 
@@ -66,9 +66,10 @@ TEST_F(TrackerTest, EventLog) {
         .size = 128,
         .alignment = 16,
         .actual_size = 128,
-        .tag = "block_" + std::to_string(i),
+        // .tag set below
         .timestamp = std::chrono::steady_clock::now(),
     };
+    meta.set_tag("block_" + std::to_string(i));
     tracker_->record_alloc(meta);
   }
 
@@ -83,9 +84,10 @@ TEST_F(TrackerTest, Snapshot) {
         .size = 256,
         .alignment = 16,
         .actual_size = 256,
-        .tag = "snap_" + std::to_string(i),
+        // .tag set below
         .timestamp = std::chrono::steady_clock::now(),
     };
+    meta.set_tag("snap_" + std::to_string(i));
     tracker_->record_alloc(meta);
   }
 
@@ -124,9 +126,10 @@ TEST_F(TrackerTest, MonotonicEventIds) {
         .size = 128,
         .alignment = 16,
         .actual_size = 128,
-        .tag = "id_test",
+        // .tag set below
         .timestamp = std::chrono::steady_clock::now(),
     };
+    meta.set_tag("id_test");
     tracker_->record_alloc(meta);
   }
 

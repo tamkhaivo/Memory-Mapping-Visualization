@@ -103,7 +103,7 @@ auto CacheAnalyzer::analyze(std::span<const BlockMetadata> blocks,
         accum.is_split = true;
       }
 
-      if (!block.tag.empty()) {
+      if (block.tag[0] != '\0') {
         accum.tags.push_back(block.tag);
       }
     }

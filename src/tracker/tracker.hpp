@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <functional>
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 namespace mmap_viz {

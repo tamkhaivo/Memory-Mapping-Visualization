@@ -18,6 +18,9 @@ FreeListAllocator::FreeListAllocator(Arena &arena) noexcept : arena_{arena} {
       .next = nullptr,
   };
   head_ = block;
+  free_blocks_ = 1;
+  largest_free_ = block->size;
+  largest_free_dirty_ = false;
 }
 
 auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
@@ -76,6 +79,12 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
       } else {
         head_ = new_free;
       }
+
+      // Count stays same (1 used, 1 new free replacing old free)
+      // But size changed, so largest might be invalid if we split the largest
+      if (curr->size == largest_free_) {
+        largest_free_dirty_ = true;
+      }
     } else {
       // Absorb remainder into allocation (avoid tiny unusable fragments).
       actual_size = curr->size;
@@ -84,6 +93,11 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
         prev->next = curr->next;
       } else {
         head_ = curr->next;
+      }
+
+      free_blocks_--;
+      if (curr->size == largest_free_) {
+        largest_free_dirty_ = true;
       }
     }
 
@@ -150,6 +164,12 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t size)
     head_ = freed;
   }
 
+  free_blocks_++;
+  if (freed->size > largest_free_) {
+    largest_free_ = freed->size;
+    largest_free_dirty_ = false;
+  }
+
   allocated_ -= actual_size;
 
   // Coalesce with next block if adjacent.
@@ -158,6 +178,11 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t size)
     if (freed_end == reinterpret_cast<std::byte *>(curr)) {
       freed->size += curr->size;
       freed->next = curr->next;
+      free_blocks_--;
+      if (freed->size > largest_free_) {
+        largest_free_ = freed->size;
+        largest_free_dirty_ = false;
+      }
     }
   }
 
@@ -167,6 +192,11 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t size)
     if (prev_end == reinterpret_cast<std::byte *>(freed)) {
       prev->size += freed->size;
       prev->next = freed->next;
+      free_blocks_--;
+      if (prev->size > largest_free_) {
+        largest_free_ = prev->size;
+        largest_free_dirty_ = false;
+      }
     }
   }
 
@@ -182,21 +212,21 @@ auto FreeListAllocator::bytes_free() const noexcept -> std::size_t {
 }
 
 auto FreeListAllocator::largest_free_block() const noexcept -> std::size_t {
-  std::size_t largest = 0;
-  for (auto *curr = head_; curr != nullptr; curr = curr->next) {
-    if (curr->size > largest) {
-      largest = curr->size;
+  if (largest_free_dirty_) {
+    std::size_t largest = 0;
+    for (auto *curr = head_; curr != nullptr; curr = curr->next) {
+      if (curr->size > largest) {
+        largest = curr->size;
+      }
     }
+    largest_free_ = largest;
+    largest_free_dirty_ = false;
   }
-  return largest;
+  return largest_free_;
 }
 
 auto FreeListAllocator::free_block_count() const noexcept -> std::size_t {
-  std::size_t count = 0;
-  for (auto *curr = head_; curr != nullptr; curr = curr->next) {
-    ++count;
-  }
-  return count;
+  return free_blocks_;
 }
 
 auto FreeListAllocator::capacity() const noexcept -> std::size_t {

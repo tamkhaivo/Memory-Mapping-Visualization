@@ -3,6 +3,8 @@
 
 #include "tracker/tracker.hpp"
 #include "allocator/free_list.hpp"
+#include "tracker/tracker.hpp"
+#include <algorithm>
 
 namespace mmap_viz {
 
@@ -93,6 +95,11 @@ auto AllocationTracker::snapshot() const -> std::vector<BlockMetadata> {
   for (const auto &[offset, meta] : active_blocks_) {
     result.push_back(meta);
   }
+  // Sort by offset as unordered_map loses order.
+  std::sort(result.begin(), result.end(),
+            [](const BlockMetadata &a, const BlockMetadata &b) {
+              return a.offset < b.offset;
+            });
   return result;
 }
 

@@ -45,9 +45,8 @@ auto VisualizationArena::create(ArenaConfig cfg)
     va.tracker_ = std::make_unique<AllocationTracker>(
         *va.allocator_, cfg.sampling,
         [batcher = va.batcher_](const AllocationEvent &evt) {
-          nlohmann::json j = evt;
           std::lock_guard lock(batcher->mutex);
-          batcher->events.push_back(j.dump());
+          batcher->events.push_back(evt);
         });
 
     // Wire up snapshot provider.
@@ -73,7 +72,7 @@ auto VisualizationArena::create(ArenaConfig cfg)
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
 
         // simple flush logic
-        std::vector<std::string> batch;
+        std::vector<AllocationEvent> batch;
         {
           std::lock_guard lock(batcher->mutex);
           if (batcher->events.empty())
@@ -84,7 +83,10 @@ auto VisualizationArena::create(ArenaConfig cfg)
         if (server) { // server pointer valid as long as main thread runs
           std::string payload = "[";
           for (size_t i = 0; i < batch.size(); ++i) {
-            payload += batch[i];
+            nlohmann::json j = batch[i];
+            payload += j.dump();
+            // payload += ",\n"; // Pretty print killed perf, condensed is
+            // better
             if (i < batch.size() - 1)
               payload += ",";
           }
@@ -161,9 +163,10 @@ auto VisualizationArena::alloc_raw(std::size_t size, std::size_t alignment,
       .size = size,
       .alignment = alignment,
       .actual_size = result->actual_size,
-      .tag = std::string{tag},
+      // .tag set below
       .timestamp = std::chrono::steady_clock::now(),
   };
+  meta.set_tag(tag);
   tracker_->record_alloc(std::move(meta));
 
   {

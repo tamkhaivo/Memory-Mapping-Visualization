@@ -161,7 +161,7 @@ private:
 
   struct Batcher {
     std::mutex mutex;
-    std::vector<std::string> events;
+    std::vector<AllocationEvent> events;
   };
   std::shared_ptr<Batcher> batcher_;
 

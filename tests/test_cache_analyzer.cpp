@@ -14,14 +14,16 @@ using namespace mmap_viz;
 
 static auto make_block(std::size_t offset, std::size_t size,
                        std::string tag = "") -> BlockMetadata {
-  return BlockMetadata{
+  BlockMetadata meta{
       .offset = offset,
       .size = size,
       .alignment = 16,
       .actual_size = size,
-      .tag = std::move(tag),
+      // .tag set below
       .timestamp = std::chrono::steady_clock::now(),
   };
+  meta.set_tag(tag);
+  return meta;
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────

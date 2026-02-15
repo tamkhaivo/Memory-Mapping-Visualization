@@ -99,6 +99,11 @@ private:
   Arena &arena_;
   FreeBlock *head_ = nullptr;
   std::size_t allocated_ = 0;
+
+  // O(1) stats cache
+  std::size_t free_blocks_ = 0;
+  mutable std::size_t largest_free_ = 0;
+  mutable bool largest_free_dirty_ = true;
 };
 
 } // namespace mmap_viz

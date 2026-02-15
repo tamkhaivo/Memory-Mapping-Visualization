@@ -79,6 +79,16 @@ target_link_libraries(memory_mapper_bench PRIVATE
     benchmark::benchmark_main
 )
 
+add_executable(memory_mapper_bench_throughput
+    bench/bench_throughput.cpp
+)
+
+target_link_libraries(memory_mapper_bench_throughput PRIVATE
+    memory_mapper_lib
+    benchmark::benchmark
+    benchmark::benchmark_main
+)
+
 # --- Copy web assets to build directory ---
 add_custom_command(TARGET memory_mapper POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory

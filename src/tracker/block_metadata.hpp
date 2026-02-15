@@ -2,10 +2,13 @@
 /// @file block_metadata.hpp
 /// @brief Data structures for allocation tracking and event recording.
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <string>
+#include <cstring>
+#include <string_view>
 
 namespace mmap_viz {
 
@@ -15,8 +18,14 @@ struct BlockMetadata {
   std::size_t size;        ///< Requested allocation size.
   std::size_t alignment;   ///< Requested alignment.
   std::size_t actual_size; ///< Size including alignment padding.
-  std::string tag;         ///< Optional label for the allocation.
+  char tag[32] = {};       ///< Optional label (fixed buffer to avoid malloc).
   std::chrono::steady_clock::time_point timestamp; ///< When the event occurred.
+
+  void set_tag(std::string_view t) {
+    std::size_t len = std::min(t.size(), sizeof(tag) - 1);
+    std::memcpy(tag, t.data(), len);
+    tag[len] = '\0';
+  }
 };
 
 /// @brief Type of allocation event.

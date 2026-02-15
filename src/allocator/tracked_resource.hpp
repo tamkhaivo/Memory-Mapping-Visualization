@@ -44,9 +44,10 @@ protected:
         .size = bytes,
         .alignment = alignment,
         .actual_size = result->actual_size,
-        .tag = std::move(next_tag_),
+        // .tag set below
         .timestamp = std::chrono::steady_clock::now(),
     };
+    meta.set_tag(next_tag_);
 
     tracker_.record_alloc(std::move(meta));
     next_tag_.clear();
