@@ -118,6 +118,7 @@ private:
 
   /// @brief Updates subtree_max for x and its ancestors.
   void update_max(FreeBlock *x);
+  void update_max_upwards(FreeBlock *x);
 
   /// @brief Finds the first block in address order that fits the size.
   [[nodiscard]] auto find_first_fit(std::size_t size) const -> FreeBlock *;

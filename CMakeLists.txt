@@ -69,6 +69,13 @@ target_link_libraries(memory_mapper_tests PRIVATE
 include(GoogleTest)
 gtest_discover_tests(memory_mapper_tests)
 
+add_executable(stress_test_arena
+    tests/stress_test_arena.cpp
+)
+target_link_libraries(stress_test_arena PRIVATE
+    memory_mapper_lib
+)
+
 # --- Benchmarks ---
 add_executable(memory_mapper_bench
     bench/bench_allocator.cpp
@@ -98,6 +105,25 @@ target_link_libraries(memory_mapper_bench_scalability PRIVATE
     memory_mapper_lib
     benchmark::benchmark
     benchmark::benchmark_main
+)
+
+add_executable(memory_mapper_bench_contention
+    bench/bench_contention.cpp
+)
+
+target_link_libraries(memory_mapper_bench_contention PRIVATE
+    memory_mapper_lib
+    benchmark::benchmark
+)
+
+add_executable(memory_mapper_bench_serialization
+    bench/bench_serialization.cpp
+)
+
+target_link_libraries(memory_mapper_bench_serialization PRIVATE
+    memory_mapper_lib
+    nlohmann_json::nlohmann_json
+    benchmark::benchmark
 )
 
 # --- Copy web assets to build directory ---

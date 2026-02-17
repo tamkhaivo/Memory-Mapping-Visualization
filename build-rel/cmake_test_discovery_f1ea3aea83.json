@@ -1,5 +1,5 @@
 {
-  "tests": 55,
+  "tests": 51,
   "name": "AllTests",
   "testsuites": [
     {
@@ -131,39 +131,8 @@
       ]
     },
     {
-      "name": "RingBufferTest",
-      "tests": 5,
-      "testsuite": [
-        {
-          "name": "PushPopSingle",
-          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_ring_buffer.cpp",
-          "line": 17
-        },
-        {
-          "name": "EmptyPopReturnsFalse",
-          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_ring_buffer.cpp",
-          "line": 24
-        },
-        {
-          "name": "FIFOOrder",
-          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_ring_buffer.cpp",
-          "line": 29
-        },
-        {
-          "name": "OverflowBehavior",
-          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_ring_buffer.cpp",
-          "line": 43
-        },
-        {
-          "name": "WrapAround",
-          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_ring_buffer.cpp",
-          "line": 63
-        }
-      ]
-    },
-    {
       "name": "VisualizationArenaTest",
-      "tests": 17,
+      "tests": 18,
       "testsuite": [
         {
           "name": "CreateWithDefaults",
@@ -221,12 +190,12 @@
           "line": 144
         },
         {
-          "name": "DISABLED_SnapshotJson",
+          "name": "SnapshotJson",
           "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
           "line": 156
         },
         {
-          "name": "DISABLED_EventLogJson",
+          "name": "EventLogJson",
           "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
           "line": 165
         },
@@ -249,6 +218,11 @@
           "name": "MultiThreadedAlloc",
           "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
           "line": 235
+        },
+        {
+          "name": "TwoArenasOneThread",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 270
         }
       ]
     },

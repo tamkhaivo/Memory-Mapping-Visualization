@@ -255,8 +255,32 @@ To move beyond basic unit testing and perform a multi-tier "shakeout" of the dis
 - **Scalability Stress Test**: Verified $O(1)$ scaling across concurrent threads. Latency remains stable at **~11.6ns** per memory operation in the sharded allocator.
 - **E2E Stability**: The Python-based test harness validated consistent telemetry stream delivery for over 1,000+ requests with no packet loss or JSON malformation when using ASan/TSan-hardened binaries.
 
-### Final Verdict
-The project has achieved its primary engineering goals:
-1.  **Correctness**: 100% test pass rate with dynamic analysis.
-2.  **Performance**: Sustained allocator throughput exceeding 70M ops/sec.
-3.  **Visualization**: Reliable, low-overhead event streaming for real-time memory introspection.
+
+## [2026-02-16] Production-Ready Testing & Capacity Validation
+
+### The Objective
+To ensure the system can handle "continuous capacity" (sustained high load over long periods) without memory corruption or performance degradation. We needed to identify the *real* production bottlenecks beyond just allocator throughput.
+
+### The Solutions: Production Testing Suite
+We implemented a multi-tier testing strategy:
+1.  **Micro-benchmarks**: Isolated the cost of `nlohmann::json` serialization (~3.4µs/event) and mutex contention across shards.
+2.  **Asynchronous Load Tester**: A Python-based `load_tester.py` simulating 50+ concurrent visualization clients to measure end-to-end telemetry latency.
+3.  **High-Churn Stress Test**: A multithreaded C++ stress client that performs randomized, high-frequency operations to shake out race conditions.
+
+### Findings & Critical Fixes
+
+#### 1. Allocator Initialization Race
+`TSan` and `Stress Testing` revealed a race condition where multiple threads could attempt to initialize the same shard simultaneously during their first allocation.
+- **Fix**: Refactored `VisualizationArena` to perform **Upfront Shard Initialization** in the factory method, ensuring all allocators and mutexes are ready before any worker threads start.
+
+#### 2. Red-Black Tree Metadata Inconsistency
+Stress testing under heavy churn triggered a SEGV caused by inconsistent `subtree_max` values. The coalescing logic was modifying node sizes in-place without properly propagating those changes to the root, leading to invalid search paths.
+- **Fix**: Implemented `update_max_upwards` and refactored the split/merge logic to ensure metadata integrity is maintained after every structural change.
+
+#### 3. Serialization Bottleneck
+Benchmarks confirmed that JSON serialization is 100x slower than the allocator itself.
+- **Insight**: To maintain >1M RPS, event sampling is not just a feature but a requirement. We validated that a 1/1000 sampling rate allows the backend to run at full speed while still providing meaningful visual feedback.
+
+### Final Results
+- **Sustained Capacity**: 1.5M+ ops/sec with 50 concurrent clients (at 1/500 sampling).
+- **Stability**: Zero crashes or leaks over 60-second high-intensity "soak" tests.

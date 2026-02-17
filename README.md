@@ -234,13 +234,37 @@ Memory-Mapping-Visualization/
 
 ### Run All Tests
 ```bash
+# Unit tests
 cd build && ctest --output-on-failure
+
+# Performance & Capacity Report (Runs all benchmarks + Load + Stress)
+./tools/capacity_report.sh
 ```
 
 ### Run Benchmarks
 ```bash
 ./build/memory_mapper_bench
+./build/memory_mapper_bench_throughput
+./build/memory_mapper_bench_contention
+./build/memory_mapper_bench_serialization
 ```
+
+## Performance & Capacity Testing
+
+The project includes a production-ready testing suite to identify bottlenecks and verify continuous capacity.
+
+### 1. Micro-benchmarks
+- **Contention**: Measures scaling of the sharded allocator as thread count increases.
+- **Serialization**: Quantifies the JSON encoding cost per allocation event.
+- **Scalability**: Verifies the $O(\log N)$ behavior of the Red-Black Tree allocator.
+
+### 2. Load Testing (`load_tester.py`)
+A Python-based harness that simulates multiple concurrent visualization clients. It measures:
+- **Throughput**: Events received per second.
+- **Latency**: Time from allocation in C++ to JSON reception in the client.
+
+### 3. Stress Testing (`stress_test_arena`)
+A multithreaded C++ tool that performs randomized, high-churn memory operations to verify system stability and thread-safety under extreme load.
 
 ## Configuration
 

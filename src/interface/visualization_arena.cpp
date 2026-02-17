@@ -205,6 +205,19 @@ auto VisualizationArena::create(ArenaConfig cfg)
   // 4. Build server and batcher
   impl->batcher = std::make_shared<Impl::Batcher>();
 
+  // Initialize all shards upfront to avoid races and O(1) allocation path
+  std::byte *base = impl->arena->base();
+  std::size_t total_cap = impl->arena->capacity();
+  std::size_t shard_size = total_cap / kMaxShards;
+
+  for (std::size_t i = 0; i < kMaxShards; ++i) {
+    auto shard = std::make_unique<Impl::Shard>();
+    std::byte *shard_base = base + (i * shard_size);
+    shard->allocator =
+        std::make_unique<FreeListAllocator>(shard_base, shard_size);
+    impl->shards[i] = std::move(shard);
+  }
+
   if (cfg.enable_server) {
     impl->server = std::make_unique<WsServer>(cfg.port, cfg.web_root, nullptr);
 
@@ -346,19 +359,14 @@ VisualizationArena::operator=(VisualizationArena &&other) noexcept {
 void VisualizationArena::init_tls_context() {
   auto idx = impl_->next_shard_idx.fetch_add(1);
   if (idx >= kMaxShards) {
-    return; // OOM on shards
+    // Wrap around or handle overflow
+    idx = idx % kMaxShards;
   }
 
-  std::byte *base = impl_->arena->base();
-  std::size_t shard_size = impl_->arena->capacity() / kMaxShards;
-  std::byte *shard_base = base + (idx * shard_size);
+  if (!impl_->shards[idx]) {
+    return; // Should not happen with upfront init
+  }
 
-  auto shard = std::make_unique<Impl::Shard>();
-  shard->allocator =
-      std::make_unique<FreeListAllocator>(shard_base, shard_size);
-  impl_->shards[idx] = std::move(shard);
-
-  // Release old context if any (managed by shared_ptr assignment)
   // Create new context
   tls_context_ = std::make_shared<ThreadContext>();
   tls_context_->generation = impl_->generation;
@@ -369,17 +377,7 @@ void VisualizationArena::init_tls_context() {
 
   {
     std::lock_guard lock(impl_->contexts_mutex);
-
-    // Cleanup expired contexts while we are here
-    auto it = impl_->active_contexts.begin();
-    while (it != impl_->active_contexts.end()) {
-      if (it->expired()) {
-        it = impl_->active_contexts.erase(it);
-      } else {
-        ++it;
-      }
-    }
-
+    // Registration remains the same
     impl_->active_contexts.push_back(tls_context_);
   }
 }

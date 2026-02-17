@@ -27,18 +27,13 @@ FreeListAllocator::FreeListAllocator(std::byte *base, std::size_t size) noexcept
   // Better to have a real object.
   // Let's just `new` it on the C++ heap. It's one node per allocator.
 
-  nil_ = new FreeBlock{.size = 0,
-                       .parent = nullptr,
-                       .left = nullptr,
-                       .right = nullptr,
-                       .subtree_max = 0,
-                       .color = Color::Black};
-
-  // self-referential for safety, though standard RB nil just needs to be Black
-  // and 0 size.
+  nil_ = new FreeBlock();
+  nil_->size = 0;
+  nil_->parent = nil_;
   nil_->left = nil_;
   nil_->right = nil_;
-  nil_->parent = nil_;
+  nil_->subtree_max = 0;
+  nil_->color = Color::Black;
 
   root_ = nil_;
 
@@ -273,6 +268,8 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
 
   auto *block_addr = reinterpret_cast<std::byte *>(header);
 
+  // 1. Find potential neighbors in address-ordered tree
+  // We insert a temporary node to find predecessor/successor
   auto *freed = new (block_addr) FreeBlock{.size = actual_size,
                                            .parent = nil_,
                                            .left = nil_,
@@ -284,25 +281,28 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
   free_blocks_++;
   allocated_ -= actual_size;
 
-  auto *prev = predecessor(freed);
-  if (prev != nil_) {
-    auto *prev_end = reinterpret_cast<std::byte *>(prev) + prev->size;
-    if (prev_end == reinterpret_cast<std::byte *>(freed)) {
-      delete_node(freed);
-      prev->size += freed->size;
-      update_max(prev);
-      free_blocks_--;
-      freed = prev;
-    }
-  }
-
+  // 2. Coalesce with Successor
   auto *succ = successor(freed);
   if (succ != nil_) {
     auto *freed_end = reinterpret_cast<std::byte *>(freed) + freed->size;
     if (freed_end == reinterpret_cast<std::byte *>(succ)) {
+      std::size_t succ_size = succ->size;
       delete_node(succ);
-      freed->size += succ->size;
-      update_max(freed);
+      freed->size += succ_size;
+      update_max_upwards(freed);
+      free_blocks_--;
+    }
+  }
+
+  // 3. Coalesce with Predecessor
+  auto *prev = predecessor(freed);
+  if (prev != nil_) {
+    auto *prev_end = reinterpret_cast<std::byte *>(prev) + prev->size;
+    if (prev_end == reinterpret_cast<std::byte *>(freed)) {
+      std::size_t freed_size = freed->size;
+      delete_node(freed);
+      prev->size += freed_size;
+      update_max_upwards(prev);
       free_blocks_--;
     }
   }
@@ -642,8 +642,21 @@ auto FreeListAllocator::successor(FreeBlock *x) const -> FreeBlock * {
   return y;
 }
 
+void FreeListAllocator::update_max_upwards(FreeBlock *x) {
+  while (x != nil_ && x != nullptr) {
+    std::size_t old_max = x->subtree_max;
+    update_max(x);
+    if (x->subtree_max == old_max) {
+      // Optimization: if max didn't change, we can potentially stop.
+      // But wait, if we decreased size, we might need to continue.
+      // For simplicity, always walk up or at least check one more level.
+    }
+    x = x->parent;
+  }
+}
+
 void FreeListAllocator::update_max(FreeBlock *x) {
-  if (x == nil_)
+  if (x == nil_ || x == nullptr)
     return;
   x->subtree_max = x->size;
   if (x->left != nil_) {
