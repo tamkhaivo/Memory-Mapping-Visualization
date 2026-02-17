@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="Real-time memory allocation visualizer showing allocated and free memory blocks in a custom arena allocator.">
+    <title>Memory Mapper — Real-Time Visualization</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                        <rect x="2" y="2" width="10" height="10" rx="2" fill="#4ade80" opacity="0.9" />
+                        <rect x="14" y="2" width="10" height="10" rx="2" fill="#1e293b" stroke="#334155"
+                            stroke-width="1" />
+                        <rect x="2" y="14" width="10" height="10" rx="2" fill="#1e293b" stroke="#334155"
+                            stroke-width="1" />
+                        <rect x="14" y="14" width="10" height="10" rx="2" fill="#4ade80" opacity="0.6" />
+                    </svg>
+                    <h1>Memory Mapper</h1>
+                </div>
+                <span class="version">v0.1.0</span>
+            </div>
+            <div class="header-right">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Stats Bar -->
+            <section class="stats-bar" id="statsBar">
+                <div class="stat-card">
+                    <span class="stat-label">Capacity</span>
+                    <span class="stat-value" id="statCapacity">—</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Allocated</span>
+                    <span class="stat-value stat-allocated" id="statAllocated">—</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Free</span>
+                    <span class="stat-value stat-free" id="statFree">—</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Fragmentation</span>
+                    <span class="stat-value stat-frag" id="statFrag">—</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Free Blocks</span>
+                    <span class="stat-value" id="statFreeBlocks">—</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Events</span>
+                    <span class="stat-value" id="statEvents">0</span>
+                </div>
+            </section>
+
+            <!-- Memory Map -->
+            <section class="memory-section">
+                <div class="section-header">
+                    <h2>Arena Memory Map</h2>
+                    <div class="legend">
+                        <span class="legend-item"><span class="legend-color legend-allocated"></span>Allocated</span>
+                        <span class="legend-item"><span class="legend-color legend-free"></span>Free</span>
+                        <span class="legend-item"><span class="legend-color legend-dealloc"></span>Just Freed</span>
+                        <span class="legend-item legend-heatmap" id="legendHeatmap"><span
+                                class="legend-color legend-heatmap-color"></span>Heatmap</span>
+                        <button class="btn-toggle" id="btnHeatmap">Heatmap: OFF</button>
+                    </div>
+                </div>
+                <div class="canvas-container" id="canvasContainer">
+                    <canvas id="memoryCanvas"></canvas>
+                    <div class="tooltip" id="tooltip"></div>
+                </div>
+                <!-- Fragmentation bar -->
+                <div class="frag-bar-container">
+                    <div class="frag-bar" id="fragBar"></div>
+                </div>
+            </section>
+
+            <!-- Stress Test Controls -->
+            <section class="stress-section">
+                <div class="section-header">
+                    <h2>Stress Test Controls</h2>
+                    <span class="stress-status" id="stressStatus"></span>
+                </div>
+                <div class="stress-buttons">
+                    <button class="btn-stress btn-stress-burst" id="btnBurst"
+                        title="200 rapid random alloc/dealloc (16B–2KB)">⚡ Random Burst</button>
+                    <button class="btn-stress btn-stress-frag" id="btnFrag"
+                        title="Fill arena with 128B blocks then free every other one">🧱 Frag Storm</button>
+                    <button class="btn-stress btn-stress-large" id="btnLarge"
+                        title="Allocate progressively larger blocks (256B–128KB)">📦 Large Blocks</button>
+                    <button class="btn-stress btn-stress-cleanup" id="btnCleanup" title="Free all live allocations">🧹
+                        Cleanup</button>
+                    <button class="btn-stress btn-stress-stop" id="btnStop" title="Stop current stress test">⏹
+                        Stop</button>
+                </div>
+            </section>
+
+            <section class="timeline-section">
+                <div class="section-header">
+                    <h2>Event Timeline</h2>
+                    <div class="timeline-controls">
+                        <button class="btn-action" id="btnExport" title="Export event log as JSON">⬇ Export</button>
+                        <label class="btn-action btn-import-label" title="Import event log JSON">
+                            ⬆ Import
+                            <input type="file" id="fileImport" accept=".json" hidden>
+                        </label>
+                        <button class="btn-action btn-replay" id="btnReplay" title="Replay imported events" disabled>▶
+                            Replay</button>
+                        <span class="replay-status" id="replayStatus"></span>
+                        <button class="btn-clear" id="btnClear">Clear</button>
+                    </div>
+                </div>
+                <div class="timeline" id="timeline">
+                    <div class="timeline-empty">Waiting for events...</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

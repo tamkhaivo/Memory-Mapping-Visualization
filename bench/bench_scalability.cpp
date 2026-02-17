@@ -32,7 +32,7 @@ static void BM_Scalability(benchmark::State &state) {
   // We need to keep the arena object alive.
   Arena my_arena = std::move(result.value());
 
-  FreeListAllocator alloc{my_arena};
+  FreeListAllocator alloc{my_arena.base(), my_arena.capacity()};
 
   // Setup fragmentation
   std::vector<void *> keep_ptrs;

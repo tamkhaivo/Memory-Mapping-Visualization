@@ -1,7 +1,5 @@
-#include "allocator/arena.hpp"
 #include "allocator/free_list.hpp"
 #include "interface/visualization_arena.hpp"
-#include "tracker/tracker.hpp"
 #include <benchmark/benchmark.h>
 #include <random>
 #include <vector>
@@ -11,7 +9,7 @@ using namespace mmap_viz;
 // Baseline: Just the allocator (no tracking, no visualization)
 static void BM_AllocatorOnly(benchmark::State &state) {
   auto arena = Arena::create(64 * 1024 * 1024).value(); // 64MB
-  FreeListAllocator allocator(arena);
+  FreeListAllocator allocator(arena.base(), arena.capacity());
 
   std::vector<void *> ptrs;
   ptrs.reserve(10000);

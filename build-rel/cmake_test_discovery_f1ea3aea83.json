@@ -1,0 +1,317 @@
+{
+  "tests": 55,
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "ArenaTest",
+      "tests": 7,
+      "testsuite": [
+        {
+          "name": "CreateWithValidCapacity",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_arena.cpp",
+          "line": 10
+        },
+        {
+          "name": "CapacityIsPageAligned",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_arena.cpp",
+          "line": 17
+        },
+        {
+          "name": "CreateWithZeroCapacityFails",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_arena.cpp",
+          "line": 26
+        },
+        {
+          "name": "MoveConstruction",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_arena.cpp",
+          "line": 31
+        },
+        {
+          "name": "MoveAssignment",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_arena.cpp",
+          "line": 47
+        },
+        {
+          "name": "MemoryIsReadableWritable",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_arena.cpp",
+          "line": 61
+        },
+        {
+          "name": "LargeArena",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_arena.cpp",
+          "line": 77
+        }
+      ]
+    },
+    {
+      "name": "FreeListTest",
+      "tests": 11,
+      "testsuite": [
+        {
+          "name": "SingleAllocation",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 27
+        },
+        {
+          "name": "MultipleAllocations",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 36
+        },
+        {
+          "name": "AllocateAndDeallocate",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 53
+        },
+        {
+          "name": "Coalescing",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 64
+        },
+        {
+          "name": "OutOfMemory",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 81
+        },
+        {
+          "name": "InvalidAlignment",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 88
+        },
+        {
+          "name": "AlignedAllocation",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 94
+        },
+        {
+          "name": "BytesFreeConsistency",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 100
+        },
+        {
+          "name": "FragmentationPattern",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 111
+        },
+        {
+          "name": "DeallocateNullptr",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 129
+        },
+        {
+          "name": "BadPointer",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_free_list.cpp",
+          "line": 134
+        }
+      ]
+    },
+    {
+      "name": "TrackerTest",
+      "tests": 4,
+      "testsuite": [
+        {
+          "name": "RecordAlloc",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_tracker.cpp",
+          "line": 29
+        },
+        {
+          "name": "RecordDealloc",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_tracker.cpp",
+          "line": 51
+        },
+        {
+          "name": "Sampling",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_tracker.cpp",
+          "line": 65
+        },
+        {
+          "name": "EventMonotonicity",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_tracker.cpp",
+          "line": 87
+        }
+      ]
+    },
+    {
+      "name": "RingBufferTest",
+      "tests": 5,
+      "testsuite": [
+        {
+          "name": "PushPopSingle",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_ring_buffer.cpp",
+          "line": 17
+        },
+        {
+          "name": "EmptyPopReturnsFalse",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_ring_buffer.cpp",
+          "line": 24
+        },
+        {
+          "name": "FIFOOrder",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_ring_buffer.cpp",
+          "line": 29
+        },
+        {
+          "name": "OverflowBehavior",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_ring_buffer.cpp",
+          "line": 43
+        },
+        {
+          "name": "WrapAround",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_ring_buffer.cpp",
+          "line": 63
+        }
+      ]
+    },
+    {
+      "name": "VisualizationArenaTest",
+      "tests": 17,
+      "testsuite": [
+        {
+          "name": "CreateWithDefaults",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 31
+        },
+        {
+          "name": "CreateWithCustomConfig",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 39
+        },
+        {
+          "name": "CreateWithZeroFails",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 49
+        },
+        {
+          "name": "TypedAllocDealloc",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 56
+        },
+        {
+          "name": "TypedAllocAlignment",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 69
+        },
+        {
+          "name": "MultipleTypedAllocs",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 78
+        },
+        {
+          "name": "RawAllocDealloc",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 98
+        },
+        {
+          "name": "RawAllocNullOnOOM",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 106
+        },
+        {
+          "name": "PmrInterop",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 114
+        },
+        {
+          "name": "DISABLED_PaddingReport",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 130
+        },
+        {
+          "name": "DISABLED_CacheReport",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 144
+        },
+        {
+          "name": "DISABLED_SnapshotJson",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 156
+        },
+        {
+          "name": "DISABLED_EventLogJson",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 165
+        },
+        {
+          "name": "InspectLayoutPadded",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 189
+        },
+        {
+          "name": "InspectLayoutPacked",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 209
+        },
+        {
+          "name": "MoveConstruction",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 226
+        },
+        {
+          "name": "MultiThreadedAlloc",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_visualization_arena.cpp",
+          "line": 235
+        }
+      ]
+    },
+    {
+      "name": "CacheAnalyzerTest",
+      "tests": 11,
+      "testsuite": [
+        {
+          "name": "EmptyArena",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 37
+        },
+        {
+          "name": "SingleBlockSingleLine",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 50
+        },
+        {
+          "name": "FullLineUtilization",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 70
+        },
+        {
+          "name": "SplitAcrossLines",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 82
+        },
+        {
+          "name": "MultipleBlocksOneLine",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 111
+        },
+        {
+          "name": "UtilizationAverage",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 129
+        },
+        {
+          "name": "LargeBlockSpansMultipleLines",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 144
+        },
+        {
+          "name": "DetectLineSize",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 156
+        },
+        {
+          "name": "LineSizeAccessor",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 163
+        },
+        {
+          "name": "InvalidLineSizeFallback",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 171
+        },
+        {
+          "name": "SortedOutputByLineIndex",
+          "file": "\/Users\/tvo\/Documents\/portfolio\/senior_project\/Memory-Mapping-Visualization\/tests\/test_cache_analyzer.cpp",
+          "line": 180
+        }
+      ]
+    }
+  ]
+}

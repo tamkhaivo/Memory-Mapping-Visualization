@@ -11,7 +11,7 @@ using namespace mmap_viz;
 
 static void BM_Allocate64B(benchmark::State &state) {
   auto arena = Arena::create(1024 * 1024).value();
-  FreeListAllocator alloc{arena};
+  FreeListAllocator alloc{arena.base(), arena.capacity()};
 
   for (auto _ : state) {
     auto r = alloc.allocate(64, 16);
@@ -26,7 +26,7 @@ BENCHMARK(BM_Allocate64B);
 
 static void BM_AllocateDealloc64B(benchmark::State &state) {
   auto arena = Arena::create(1024 * 1024).value();
-  FreeListAllocator alloc{arena};
+  FreeListAllocator alloc{arena.base(), arena.capacity()};
 
   for (auto _ : state) {
     auto r = alloc.allocate(64, 16);
@@ -40,7 +40,7 @@ BENCHMARK(BM_AllocateDealloc64B);
 
 static void BM_AllocateVarySizes(benchmark::State &state) {
   auto arena = Arena::create(4 * 1024 * 1024).value();
-  FreeListAllocator alloc{arena};
+  FreeListAllocator alloc{arena.base(), arena.capacity()};
 
   const std::size_t sizes[] = {32, 64, 128, 256, 512, 1024, 2048, 4096};
   std::size_t idx = 0;
@@ -59,7 +59,7 @@ BENCHMARK(BM_AllocateVarySizes);
 
 static void BM_FragmentedAllocDealloc(benchmark::State &state) {
   auto arena = Arena::create(1024 * 1024).value();
-  FreeListAllocator alloc{arena};
+  FreeListAllocator alloc{arena.base(), arena.capacity()};
 
   // Pre-fragment: allocate 100 blocks, free every other.
   std::vector<AllocationResult> blocks;

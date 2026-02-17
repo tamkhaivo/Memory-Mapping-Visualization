@@ -14,9 +14,11 @@ namespace mmap_viz {
 // ─── WsSession ──────────────────────────────────────────────────────────
 
 WsSession::WsSession(tcp::socket socket, std::string web_root,
-                     CommandHandler on_command)
+                     CommandHandler on_command,
+                     SnapshotProvider snapshot_provider)
     : ws_{std::move(socket)}, web_root_{std::move(web_root)},
-      on_command_{std::move(on_command)} {}
+      on_command_{std::move(on_command)},
+      snapshot_provider_{std::move(snapshot_provider)} {}
 
 void WsSession::run() {
   // Read the initial HTTP request to decide: WebSocket upgrade or static file.
@@ -41,6 +43,12 @@ void WsSession::on_accept(beast::error_code ec) {
   if (ec)
     return;
   is_websocket_ = true;
+
+  // Send snapshot immediately after handshake
+  if (snapshot_provider_) {
+    send(snapshot_provider_());
+  }
+
   do_read();
 }
 
@@ -70,12 +78,12 @@ void WsSession::on_read(beast::error_code ec,
 }
 
 void WsSession::send(std::string message) {
-  if (!is_websocket_)
-    return;
-
   auto msg = std::make_shared<std::string>(std::move(message));
 
   net::post(ws_.get_executor(), [self = shared_from_this(), msg]() {
+    if (!self->is_websocket_)
+      return;
+
     beast::error_code ec;
     self->ws_.text(true);
     self->ws_.write(net::buffer(*msg), ec);
@@ -169,8 +177,8 @@ void WsServer::do_accept() {
     if (ec)
       return;
 
-    auto session = std::make_shared<WsSession>(std::move(socket), web_root_,
-                                               command_handler_);
+    auto session = std::make_shared<WsSession>(
+        std::move(socket), web_root_, command_handler_, snapshot_provider_);
 
     {
       std::lock_guard lock(sessions_mutex_);
@@ -179,14 +187,7 @@ void WsServer::do_accept() {
 
     session->run();
 
-    // Send snapshot to new WebSocket client after a brief delay
-    // (allow the upgrade to complete first).
-    if (snapshot_provider_) {
-      auto snapshot = snapshot_provider_();
-      net::post(ioc_, [session, snapshot = std::move(snapshot)]() {
-        session->send(snapshot);
-      });
-    }
+    // Snapshot is now handled in session->on_accept()
 
     do_accept();
   });

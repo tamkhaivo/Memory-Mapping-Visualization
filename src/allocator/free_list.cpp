@@ -14,7 +14,8 @@
 
 namespace mmap_viz {
 
-FreeListAllocator::FreeListAllocator(Arena &arena) noexcept : arena_{arena} {
+FreeListAllocator::FreeListAllocator(std::byte *base, std::size_t size) noexcept
+    : base_{base}, size_{size} {
   // Initialize sentinel node for leaves.
   // We allocate it from the arena? No, that's messy.
   // We can just use a static instance or a member instance?
@@ -42,12 +43,12 @@ FreeListAllocator::FreeListAllocator(Arena &arena) noexcept : arena_{arena} {
   root_ = nil_;
 
   // Initialize with a single free block spanning the entire arena.
-  auto *block = new (arena_.base()) FreeBlock{
-      .size = arena_.capacity(),
+  auto *block = new (base_) FreeBlock{
+      .size = size_,
       .parent = nil_,
       .left = nil_,
       .right = nil_,
-      .subtree_max = arena_.capacity(),
+      .subtree_max = size_,
       .color = Color::Black, // Root is always black
   };
 
@@ -96,8 +97,8 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
     std::size_t idx = (quantized_size / kSmallBlockQuantum) - 1;
 
     if (free_lists_[idx] != nullptr) {
-      FreeBlock *block = free_lists_[idx];
-      free_lists_[idx] = block->right;
+      FreeNode *block = free_lists_[idx];
+      free_lists_[idx] = block->next;
 
       free_blocks_--;
       allocated_ += quantized_size;
@@ -111,7 +112,7 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
       return AllocationResult{
           .ptr = reinterpret_cast<std::byte *>(block) + header_size,
           .offset = static_cast<std::size_t>(
-              reinterpret_cast<std::byte *>(block) - arena_.base()),
+              reinterpret_cast<std::byte *>(block) - base_),
           .actual_size = quantized_size,
       };
     }
@@ -149,8 +150,9 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
 
         if (pre_padding <= kMaxSmallBlockSize) {
           std::size_t idx = (pre_padding / kSmallBlockQuantum) - 1;
-          gap_block->right = free_lists_[idx];
-          free_lists_[idx] = gap_block;
+          auto *node = reinterpret_cast<FreeNode *>(gap_block);
+          node->next = free_lists_[idx];
+          free_lists_[idx] = node;
         } else {
           gap_block->parent = nil_;
           gap_block->left = nil_;
@@ -190,8 +192,8 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
         if (remainder_size <= kMaxSmallBlockSize) {
           std::size_t idx = (remainder_size / kSmallBlockQuantum) - 1;
           auto *node =
-              reinterpret_cast<FreeBlock *>(header_ptr + actual_used_size);
-          node->right = free_lists_[idx];
+              reinterpret_cast<FreeNode *>(header_ptr + actual_used_size);
+          node->next = free_lists_[idx];
           free_lists_[idx] = node;
         } else {
           absorbed = true;
@@ -215,7 +217,7 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
 
       return AllocationResult{
           .ptr = user_ptr,
-          .offset = static_cast<std::size_t>(header_ptr - arena_.base()),
+          .offset = static_cast<std::size_t>(header_ptr - base_),
           .actual_size = actual_used_size,
       };
     }
@@ -234,8 +236,8 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
   if (ptr == nullptr)
     return {};
 
-  auto *base = arena_.base();
-  auto *end = base + arena_.capacity();
+  auto *base = base_;
+  auto *end = base + size_;
 
   if (ptr < base || ptr >= end) {
     return std::unexpected(AllocError::BadPointer);
@@ -259,9 +261,9 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
     if (idx >= kNumSmallClasses)
       idx = kNumSmallClasses - 1;
 
-    auto *block = reinterpret_cast<FreeBlock *>(header);
+    auto *block = reinterpret_cast<FreeNode *>(header);
 
-    block->right = free_lists_[idx];
+    block->next = free_lists_[idx];
     free_lists_[idx] = block;
 
     allocated_ -= actual_size;
@@ -313,7 +315,7 @@ auto FreeListAllocator::bytes_allocated() const noexcept -> std::size_t {
 }
 
 auto FreeListAllocator::bytes_free() const noexcept -> std::size_t {
-  return arena_.capacity() - allocated_;
+  return size_ - allocated_;
 }
 
 auto FreeListAllocator::largest_free_block() const noexcept -> std::size_t {
@@ -327,12 +329,10 @@ auto FreeListAllocator::free_block_count() const noexcept -> std::size_t {
 }
 
 auto FreeListAllocator::capacity() const noexcept -> std::size_t {
-  return arena_.capacity();
+  return size_;
 }
 
-auto FreeListAllocator::base() const noexcept -> std::byte * {
-  return arena_.base();
-}
+auto FreeListAllocator::base() const noexcept -> std::byte * { return base_; }
 
 // --- RB Tree Implementation ---
 
@@ -480,6 +480,10 @@ void FreeListAllocator::rb_transplant(FreeBlock *u, FreeBlock *v) {
 }
 
 void FreeListAllocator::delete_node(FreeBlock *z) {
+  if (z->parent == nil_) {
+    // Parent is nil (root), this is fine.
+  }
+
   FreeBlock *y = z;
   FreeBlock *x;
   Color y_original_color = y->color;

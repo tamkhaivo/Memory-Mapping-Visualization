@@ -31,7 +31,8 @@ using CommandHandler = std::function<void(const std::string &)>;
 class WsSession : public std::enable_shared_from_this<WsSession> {
 public:
   explicit WsSession(tcp::socket socket, std::string web_root,
-                     CommandHandler on_command);
+                     CommandHandler on_command,
+                     SnapshotProvider snapshot_provider);
 
   /// @brief Start the session: read HTTP upgrade request,
   ///        serve static files, or upgrade to WebSocket.
@@ -57,6 +58,7 @@ private:
   bool is_websocket_ = false;
   std::string web_root_;
   CommandHandler on_command_;
+  SnapshotProvider snapshot_provider_;
 };
 
 /// @brief WebSocket + HTTP server that broadcasts AllocationEvents to all

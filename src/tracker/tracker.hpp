@@ -4,6 +4,8 @@
 
 #include "tracker/block_metadata.hpp"
 
+#include <array>
+#include <atomic>
 #include <cstddef>
 #include <functional>
 #include <map>
@@ -11,9 +13,9 @@
 #include <unordered_map>
 #include <vector>
 
-namespace mmap_viz {
+#include "allocator/free_list.hpp"
 
-class FreeListAllocator;
+namespace mmap_viz {
 
 /// @brief Callback signature for real-time event notification.
 using EventCallback = std::function<void(const AllocationEvent &)>;
@@ -24,46 +26,87 @@ using EventCallback = std::function<void(const AllocationEvent &)>;
 /// Maintains a map of active blocks keyed by offset, and a full event log
 /// for replay support. Optionally invokes a callback on each event for
 /// real-time streaming to the WebSocket server.
-class AllocationTracker {
+/// @brief Fixed-size lock-free ring buffer for allocation events.
+template <typename T, std::size_t N> class RingBuffer {
 public:
-  /// @brief Construct a tracker for the given allocator.
-  /// @param allocator Reference to the backing FreeListAllocator.
-  /// @param sampling  Event sampling rate (1 = track all, N = track 1/N).
-  /// @param callback  Optional callback invoked on each sampled event.
-  explicit AllocationTracker(FreeListAllocator &allocator, std::size_t sampling,
-                             EventCallback callback = nullptr) noexcept;
+  void push(T &&item) {
+    auto head = head_.load(std::memory_order_relaxed);
+    auto next_head = (head + 1) % N;
+    if (next_head != tail_.load(std::memory_order_acquire)) {
+      buffer_[head] = std::move(item);
+      head_.store(next_head, std::memory_order_release);
+    }
+  }
 
-  /// @brief Record an allocation event.
-  /// @param block Metadata for the newly allocated block.
-  /// @return The generated AllocationEvent (empty if not sampled).
-  auto record_alloc(BlockMetadata block) -> AllocationEvent;
-
-  /// @brief Record a deallocation event.
-  /// @param offset Offset of the block being freed.
-  /// @return The generated AllocationEvent (empty if not sampled).
-  auto record_dealloc(std::size_t offset) -> AllocationEvent;
-
-  /// @brief Current snapshot of all active (allocated) blocks.
-  [[nodiscard]] auto snapshot() const -> std::vector<BlockMetadata>;
-
-  /// @brief Full event history for replay.
-  [[nodiscard]] auto event_log() const -> const std::vector<AllocationEvent> &;
-
-  /// @brief Number of currently active (allocated) blocks.
-  [[nodiscard]] auto active_block_count() const noexcept -> std::size_t;
-
-  /// @brief Set or replace the event callback.
-  void set_callback(EventCallback callback);
+  bool pop(T &item) {
+    auto tail = tail_.load(std::memory_order_relaxed);
+    if (tail == head_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    item = std::move(buffer_[tail]);
+    tail_.store((tail + 1) % N, std::memory_order_release);
+    return true;
+  }
 
 private:
-  auto make_event(EventType type, BlockMetadata block) -> AllocationEvent;
+  std::array<T, N> buffer_;
+  std::atomic<std::size_t> head_{0};
+  std::atomic<std::size_t> tail_{0};
+};
 
+/// @brief Thread-local tracker that writes to a ring buffer.
+class LocalTracker {
+public:
+  explicit LocalTracker(FreeListAllocator &allocator,
+                        std::size_t sampling = 1) noexcept
+      : allocator_{allocator}, sampling_{sampling} {}
+
+  void record_alloc(BlockMetadata block) {
+    if (++next_event_id_ % sampling_ != 0)
+      return;
+
+    AllocationEvent event{
+        .type = EventType::Allocate,
+        .block = std::move(block),
+        .event_id = next_event_id_,
+        .total_allocated = allocator_.bytes_allocated(),
+        .total_free = allocator_.bytes_free(),
+        .fragmentation_pct = 0, // Calculated centrally to avoid overhead
+        .free_block_count = allocator_.free_block_count(),
+    };
+    event_buffer_.push(std::move(event));
+  }
+
+  void record_dealloc(std::size_t offset, std::size_t size) {
+    if (++next_event_id_ % sampling_ != 0)
+      return;
+
+    BlockMetadata block{.offset = offset, .actual_size = size};
+    AllocationEvent event{
+        .type = EventType::Deallocate,
+        .block = std::move(block),
+        .event_id = next_event_id_,
+        .total_allocated = allocator_.bytes_allocated(),
+        .total_free = allocator_.bytes_free(),
+        .fragmentation_pct = 0,
+        .free_block_count = allocator_.free_block_count(),
+    };
+    event_buffer_.push(std::move(event));
+  }
+
+  // Drain events into a vector (called by server thread)
+  void drain_to(std::vector<AllocationEvent> &out) {
+    AllocationEvent evt;
+    while (event_buffer_.pop(evt)) {
+      out.push_back(std::move(evt));
+    }
+  }
+
+private:
   FreeListAllocator &allocator_;
-  std::vector<AllocationEvent> event_log_;
-  EventCallback callback_;
+  RingBuffer<AllocationEvent, 4096> event_buffer_; // 4K events per thread
   std::size_t sampling_;
   std::size_t next_event_id_ = 0;
-  std::size_t active_block_count_ = 0;
 };
 
 } // namespace mmap_viz

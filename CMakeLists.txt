@@ -26,6 +26,7 @@ add_library(memory_mapper_lib STATIC
     src/server/ws_server.cpp
     src/interface/visualization_arena.cpp
     src/interface/cache_analyzer.cpp
+    src/allocator/tracked_resource.cpp
 )
 
 target_include_directories(memory_mapper_lib PUBLIC

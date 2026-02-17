@@ -21,15 +21,19 @@
 #include "interface/padding_inspector.hpp"
 #include "tracker/tracker.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace mmap_viz {
 
@@ -135,6 +139,9 @@ public:
   /// @brief Get the full event history as a JSON string.
   [[nodiscard]] auto event_log_json() const -> std::string;
 
+  /// @brief Set a callback for WebSocket commands.
+  void set_command_handler(std::function<void(const std::string &)> handler);
+
   // ─── Accessors ───────────────────────────────────────────────────────
 
   /// @brief Total arena capacity in bytes.
@@ -157,23 +164,23 @@ public:
 
 private:
   VisualizationArena() = default;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
-  struct Batcher {
-    std::mutex mutex;
-    std::vector<AllocationEvent> events;
-  };
-  std::shared_ptr<Batcher> batcher_;
+  // Threads managed by VisualizationArena to allow joining in destructor.
+  std::thread batcher_thread_;
+  std::thread server_thread_;
 
-  // unique_ptr gives the Arena a stable address so FreeListAllocator can
-  // hold a reference to it even if VisualizationArena moves.
-  std::unique_ptr<Arena> arena_;
-  std::unique_ptr<FreeListAllocator> allocator_;
-  std::unique_ptr<AllocationTracker> tracker_;
-  std::unique_ptr<TrackedResource> resource_;
-  CacheAnalyzer cache_analyzer_;
+  // Global generation counter to detect stale TLS contexts
+  static std::atomic<std::size_t> global_generation_;
 
-  // Optional server (heap-allocated to avoid pulling in Boost headers).
-  std::unique_ptr<WsServer> server_;
+  // Internal types
+  struct ThreadContext;
+  static thread_local std::shared_ptr<ThreadContext> tls_context_;
+
+  // Helpers
+  void init_tls_context();
+  auto get_shard_idx(void *ptr) const -> std::size_t;
 };
 
 } // namespace mmap_viz

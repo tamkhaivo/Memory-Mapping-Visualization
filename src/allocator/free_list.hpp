@@ -47,9 +47,10 @@ struct AllocationResult {
 /// Supports coalescing on deallocate and splitting on allocate.
 class FreeListAllocator {
 public:
-  /// @brief Construct a free-list allocator over the given arena.
-  /// @param arena Reference to the backing Arena (must outlive this allocator).
-  explicit FreeListAllocator(Arena &arena) noexcept;
+  /// @brief Construct a free-list allocator over the given memory range.
+  /// @param base Start of the memory region.
+  /// @param size Size of the memory region in bytes.
+  FreeListAllocator(std::byte *base, std::size_t size) noexcept;
 
   // Non-copyable, non-movable (references an arena).
   FreeListAllocator(const FreeListAllocator &) = delete;
@@ -126,7 +127,8 @@ private:
   [[nodiscard]] auto predecessor(FreeBlock *x) const -> FreeBlock *;
   [[nodiscard]] auto successor(FreeBlock *x) const -> FreeBlock *;
 
-  Arena &arena_;
+  std::byte *base_;
+  std::size_t size_;
   FreeBlock *root_ = nullptr; ///< Root of the address-ordered RB tree.
   FreeBlock *nil_;            ///< Sentinel node for leaves.
 
@@ -136,7 +138,11 @@ private:
   static constexpr std::size_t kMaxSmallBlockSize =
       kSmallBlockQuantum * kNumSmallClasses;
 
-  FreeBlock *free_lists_[kNumSmallClasses];
+  struct FreeNode {
+    FreeNode *next;
+  };
+
+  FreeNode *free_lists_[kNumSmallClasses];
 
   std::size_t allocated_ = 0;
   std::size_t free_blocks_ = 0;

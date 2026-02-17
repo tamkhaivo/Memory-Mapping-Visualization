@@ -15,7 +15,8 @@ protected:
     auto result = Arena::create(kArenaSize);
     ASSERT_TRUE(result.has_value());
     arena_ = std::make_unique<Arena>(std::move(*result));
-    alloc_ = std::make_unique<FreeListAllocator>(*arena_);
+    alloc_ =
+        std::make_unique<FreeListAllocator>(arena_->base(), arena_->capacity());
   }
 
   static constexpr std::size_t kArenaSize = 64 * 1024; // 64 KB

@@ -1,0 +1,5 @@
+if(EXISTS "/Users/tvo/Documents/portfolio/senior_project/Memory-Mapping-Visualization/build-tsan/memory_mapper_tests[1]_tests.cmake")
+  include("/Users/tvo/Documents/portfolio/senior_project/Memory-Mapping-Visualization/build-tsan/memory_mapper_tests[1]_tests.cmake")
+else()
+  add_test(memory_mapper_tests_NOT_BUILT memory_mapper_tests_NOT_BUILT)
+endif()
