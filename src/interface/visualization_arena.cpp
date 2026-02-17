@@ -117,7 +117,8 @@ VisualizationArena::~VisualizationArena() {
 VisualizationArena::VisualizationArena(VisualizationArena &&other) noexcept
     : arena_{std::move(other.arena_)}, allocator_{std::move(other.allocator_)},
       tracker_{std::move(other.tracker_)},
-      resource_{std::move(other.resource_)}, server_{std::move(other.server_)},
+      resource_{std::move(other.resource_)},
+      cache_analyzer_{other.cache_analyzer_}, server_{std::move(other.server_)},
       batcher_{std::move(other.batcher_)} {}
 
 VisualizationArena &
@@ -151,16 +152,24 @@ auto VisualizationArena::alloc_raw(std::size_t size, std::size_t alignment,
     return nullptr;
   }
 
-  // Record in tracker (TrackedResource handles this via do_allocate, but
-  // we bypass it here for raw access — record manually).
-  // Actually, let's use the PMR do_allocate path for consistency:
-  // No — that would throw. Use the allocator directly + tracker.
+  // Write Tag to Intrusive Header
+  // ptr points to payload. Header is before it.
+  auto *header = reinterpret_cast<AllocationHeader *>(result->ptr -
+                                                      sizeof(AllocationHeader));
+
+  // Safety check magic?
+  if (header->magic == AllocationHeader::kMagicValue) {
+    std::size_t len = std::min(tag.size(), sizeof(header->tag) - 1);
+    std::memcpy(header->tag, tag.data(), len);
+    header->tag[len] = '\0';
+  }
+
+  // Record in tracker
   BlockMetadata meta{
-      .offset = result->offset,
+      .offset = result->offset, // Points to Header Start
       .size = size,
       .alignment = alignment,
-      .actual_size = result->actual_size,
-      // .tag set below
+      .actual_size = result->actual_size, // Total Block Size
       .timestamp = std::chrono::steady_clock::now(),
   };
   meta.set_tag(tag);

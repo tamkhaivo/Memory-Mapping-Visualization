@@ -4,6 +4,7 @@
 
 #include "allocator/free_list.hpp"
 #include "allocator/arena.hpp"
+#include "tracker/block_metadata.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -54,6 +55,11 @@ FreeListAllocator::FreeListAllocator(Arena &arena) noexcept : arena_{arena} {
 
   // Stats
   free_blocks_ = 1;
+
+  // Initialize segregated free lists
+  for (auto &list : free_lists_) {
+    list = nullptr;
+  }
 }
 
 // Check Allocator destructor? We aren't deleting nil_.
@@ -79,129 +85,142 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
     return std::unexpected(AllocError::InvalidAlignment);
   }
 
-  // Ensure minimum block size
-  const auto min_size = std::max(size, kMinBlockSize);
+  // Reserve space for Intrusive Header
+  const std::size_t header_size = sizeof(AllocationHeader);
+  const std::size_t total_request = size + header_size;
 
-  // Strategy:
-  // We need to find the BEST block that fits.
-  // Actually, we want ADDRESS-ORDERED first fit to reduce fragmentation at the
-  // beginning? `find_first_fit` does exactly that: lowest address block that is
-  // large enough.
+  // 1. Try Segregated Free List
+  if (total_request <= kMaxSmallBlockSize && alignment <= kSmallBlockQuantum) {
+    auto quantized_size =
+        (total_request + kSmallBlockQuantum - 1) & ~(kSmallBlockQuantum - 1);
+    std::size_t idx = (quantized_size / kSmallBlockQuantum) - 1;
 
-  // However, simple `find_first_fit(min_size)` might return a block that is
-  // large enough for `min_size` but NOT large enough after alignment is
-  // applied. The alignment overhead depends on the specific address. Since we
-  // don't know the address until we inspect the node, we might stumble.
+    if (free_lists_[idx] != nullptr) {
+      FreeBlock *block = free_lists_[idx];
+      free_lists_[idx] = block->right;
 
-  // Naive approach: Find candidate, check alignment. If fail, what?
-  // If `find_first_fit` ensures we find the *first* capable block,
-  // we can just check it. If it fails alignment (which requires more size),
-  // we might need to search for a larger block? or just the *next* block in the
-  // tree.
+      free_blocks_--;
+      allocated_ += quantized_size;
 
-  // Robust approach:
-  // Iterate through candidates.
-  // `find_first_fit` gives the first block >= min_size, let's call it C.
-  // check if C works with alignment.
-  // If yes, use it.
-  // If no, we need the next block in address order (successor) that is >=
-  // min_size. But strictly speaking, if C is the *first* block >= min_size,
-  // then any successor S is > C in address. Does S have enough size? Maybe.
-  // Since we can't easily query "First block >= size AND meets alignment", we
-  // loop using successors logic? But successor in address order might be small.
-  // We need to search the tree again?
-  // Actually, if we just traverse in-order starting from the candidate?
-  // That's O(N) in worst case (bad fragmentation with high alignment
-  // requirements). But high alignment is rare. Simple size check usually works.
+      std::memset(block, 0, quantized_size);
 
-  // Let's assume alignment overhead is small.
-  // We search for `min_size`.
+      auto *header = reinterpret_cast<AllocationHeader *>(block);
+      header->size = quantized_size;
+      header->magic = AllocationHeader::kMagicValue;
+
+      return AllocationResult{
+          .ptr = reinterpret_cast<std::byte *>(block) + header_size,
+          .offset = static_cast<std::size_t>(
+              reinterpret_cast<std::byte *>(block) - arena_.base()),
+          .actual_size = quantized_size,
+      };
+    }
+  }
+
+  // 2. Tree Allocation
+  auto min_size = total_request;
+  if (total_request > kMaxSmallBlockSize) {
+    min_size = std::max(total_request, kMinBlockSize);
+  } else {
+    min_size = std::max(total_request, std::size_t{16});
+  }
 
   auto *curr = find_first_fit(min_size);
 
   while (curr != nil_) {
-    // Check alignment
     auto *block_start = reinterpret_cast<std::byte *>(curr);
-    void *aligned_ptr = block_start;
-    std::size_t space = curr->size;
 
-    // We already know curr->size >= min_size.
-    // Check if alignment fits.
-    if (std::align(alignment, min_size, aligned_ptr, space)) {
-      // It implies it fits!
-      // `std::align` updates `aligned_ptr` and decreases `space`.
-      // The amount of padding is `curr->size - space`? No.
-      // `space` becomes the size of the block *after* the aligned pointer.
-      // The used space is `min_size`.
-      // The total bytes required from block start is `(aligned_ptr -
-      // block_start) + min_size`.
+    // Check alignment for PAYLOAD (after header)
+    void *aligned_ptr = block_start + header_size;
+    std::size_t space = curr->size - header_size;
 
-      auto *result_ptr = static_cast<std::byte *>(aligned_ptr);
-      auto padding = static_cast<std::size_t>(result_ptr - block_start);
-      auto actual_size = min_size + padding;
+    if (std::align(alignment, size, aligned_ptr, space)) {
+      // It fits!
+      auto *user_ptr = static_cast<std::byte *>(aligned_ptr);
+      auto *header_ptr = user_ptr - header_size;
+      auto pre_padding = static_cast<std::size_t>(header_ptr - block_start);
 
-      // Found a match!
-
-      // Ideally we split this block.
-      // 1. Remove curr from tree.
       delete_node(curr);
-      // Note: `delete_node` just removes it from the structure. `curr` pointer
-      // remains valid to us.
 
-      // 2. Handle leftover
-      std::size_t remainder = curr->size - actual_size;
+      // Handle Pre-Padding
+      if (pre_padding >= kSmallBlockQuantum) {
+        auto *gap_block = reinterpret_cast<FreeBlock *>(block_start);
+        gap_block->size = pre_padding;
 
-      if (remainder >= kMinBlockSize) {
-        // Split.
-        // The allocated part is [block_start, block_start + actual_size).
-        // The free part is [block_start + actual_size, end).
+        if (pre_padding <= kMaxSmallBlockSize) {
+          std::size_t idx = (pre_padding / kSmallBlockQuantum) - 1;
+          gap_block->right = free_lists_[idx];
+          free_lists_[idx] = gap_block;
+        } else {
+          gap_block->parent = nil_;
+          gap_block->left = nil_;
+          gap_block->right = nil_;
+          gap_block->subtree_max = pre_padding;
+          gap_block->color = Color::Red;
+          insert_node(gap_block);
+        }
+      }
 
-        auto *new_free = new (block_start + actual_size) FreeBlock{
-            .size = remainder,
-            .parent = nil_,
-            .left = nil_,
-            .right = nil_,
-            .subtree_max = remainder,
-            .color = Color::Red // Insert usually starts Red
-        };
+      // Handle Remainder
+      std::size_t actual_used_size = size + header_size;
 
+      // Quantize used size if small
+      if (actual_used_size <= kMaxSmallBlockSize) {
+        auto quantized = (actual_used_size + kSmallBlockQuantum - 1) &
+                         ~(kSmallBlockQuantum - 1);
+        if (curr->size - pre_padding >= quantized) {
+          actual_used_size = quantized;
+        }
+      }
+
+      std::size_t remainder_size =
+          (curr->size - pre_padding) - actual_used_size;
+
+      bool absorbed = false;
+      if (remainder_size >= kMinBlockSize) {
+        auto *new_free = new (header_ptr + actual_used_size)
+            FreeBlock{.size = remainder_size,
+                      .parent = nil_,
+                      .left = nil_,
+                      .right = nil_,
+                      .subtree_max = remainder_size,
+                      .color = Color::Red};
         insert_node(new_free);
-
-        // Stats
-        // free_blocks_ stays same (1 remove, 1 add)
+      } else if (remainder_size >= kSmallBlockQuantum) {
+        if (remainder_size <= kMaxSmallBlockSize) {
+          std::size_t idx = (remainder_size / kSmallBlockQuantum) - 1;
+          auto *node =
+              reinterpret_cast<FreeBlock *>(header_ptr + actual_used_size);
+          node->right = free_lists_[idx];
+          free_lists_[idx] = node;
+        } else {
+          absorbed = true;
+        }
       } else {
-        // Absorb remainder
-        actual_size = curr->size;
+        absorbed = true;
+      }
+
+      if (absorbed) {
+        actual_used_size += remainder_size;
         free_blocks_--;
       }
 
-      allocated_ += actual_size;
-      std::memset(block_start, 0, actual_size); // Zero memory
+      allocated_ += actual_used_size;
+
+      auto *header = reinterpret_cast<AllocationHeader *>(header_ptr);
+      header->size = actual_used_size;
+      header->magic = AllocationHeader::kMagicValue;
+
+      std::memset(user_ptr, 0, actual_used_size - header_size);
 
       return AllocationResult{
-          .ptr = result_ptr,
-          .offset = static_cast<std::size_t>(block_start - arena_.base()),
-          .actual_size = actual_size,
+          .ptr = user_ptr,
+          .offset = static_cast<std::size_t>(header_ptr - arena_.base()),
+          .actual_size = actual_used_size,
       };
     }
 
-    // Alignment failed. We need a larger block or just the next one?
-    // If alignment failed, it means `curr->size` was enough for data, but NOT
-    // enough for `data + padding`. We need to look for another block. We can
-    // just get `successor(curr)`. But `successor` might be tiny. We can just
-    // loop `curr = successor(curr)` until we find one that fits? This degrades
-    // to O(N) if many blocks are just barely large enough but fail alignment.
-    // Can we search for `min_size + alignment`?
-    // If we search for `min_size + alignment`, we are GUARANTEED that even with
-    // max alignment overhead it fits? Max overhead for alignment `A` is `A-1`.
-    // So if we search for `min_size + alignment - 1`, we are safe.
-    // But that might skip a smaller block that effectively has 0 alignment
-    // offset. Let's stick to the loop for now. It's robust correctness-wise.
-    // Optimization: check `subtree_max` of `root`?
-
     curr = successor(curr);
-
-    // Optimization: Skip nodes that are clearly too small
     while (curr != nil_ && curr->size < min_size) {
       curr = successor(curr);
     }
@@ -210,7 +229,7 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
   return std::unexpected(AllocError::OutOfMemory);
 }
 
-auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t size)
+auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
     -> std::expected<void, AllocError> {
   if (ptr == nullptr)
     return {};
@@ -222,46 +241,35 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t size)
     return std::unexpected(AllocError::BadPointer);
   }
 
-  // Same logic: assume actual_size provided is correct or rounded up.
-  // In the original, it calculated actual_size by rounding up to min.
-  // But wait, the original logic scanned the free list to find where it fits
-  // address-wise. Now we use the tree.
+  const std::size_t header_size = sizeof(AllocationHeader);
+  auto *header = reinterpret_cast<AllocationHeader *>(ptr - header_size);
 
-  auto actual_size = std::max(size, kMinBlockSize);
-  // We cannot easily know the exact padding used during allocation unless we
-  // explicitly tracked it. The original allocator assumed the user passed back
-  // the same size. If the user passed the requested size (e.g. 64), but we
-  // allocated 80 (due to padding/alignment), we might effectively leak the
-  // padding or create a hole? The original `deallocate` says: "Since we zeroed
-  // the block on alloc... we insert at the ptr address and use the size." Wait,
-  // if `ptr` is `aligned_ptr` (shifted by padding), and we free at `ptr`, we
-  // lose the padding bytes *before* `ptr`! The original code `auto *block_addr
-  // = reinterpret_cast<std::byte *>(ptr);` And then just `new (block_addr)
-  // FreeBlock`. It seems the original code IGNORED the padding bytes before
-  // `ptr`. If `padding > 0`, that space is lost forever in the original code?
-  // Let's look at original `allocate`:
-  // `auto *block_start = reinterpret_cast<std::byte *>(curr);`
-  // `auto *result_ptr = static_cast<std::byte *>(aligned_ptr);`
-  // `return ... .ptr = result_ptr ...`
-  // So the user gets `result_ptr`.
-  // In `deallocate(ptr)`, `ptr` is `result_ptr`.
-  // If `result_ptr > block_start`, there is a gap.
-  // The original `deallocate` treats `ptr` as the start of the new free block.
-  // So yes, the padding bytes are LEAKED in the original implementation!
-  // "Walk back to find the true allocation offset if alignment padding was
-  // used." comment existed, but the code just did `auto *block_addr =
-  // reinterpret_cast<std::byte *>(ptr);`. Unless `ptr` passed by user is
-  // supposed to be the *original* pointer? `AllocationResult` gives `ptr`
-  // (aligned). The tests pass `r->ptr`. So the original implementation was
-  // leaking padding. We will preserve this behavior for now (bug-for-bug
-  // compatibility?) or fix it? If we fix it, we don't know the padding size.
-  // Standard free() relies on metadata just before the pointer.
-  // We don't have that.
-  // So we MUST assume `ptr` is the block start.
-  // (Or maybe `AllocationResult.ptr` is the block start? No, it's
-  // `aligned_ptr`.)
+  if (reinterpret_cast<std::byte *>(header) < base) {
+    return std::unexpected(AllocError::BadPointer);
+  }
 
-  auto *block_addr = reinterpret_cast<std::byte *>(ptr);
+  if (header->magic != AllocationHeader::kMagicValue) {
+    return std::unexpected(AllocError::BadPointer);
+  }
+
+  std::size_t actual_size = header->size;
+
+  if (actual_size <= kMaxSmallBlockSize) {
+    std::size_t idx = (actual_size / kSmallBlockQuantum) - 1;
+    if (idx >= kNumSmallClasses)
+      idx = kNumSmallClasses - 1;
+
+    auto *block = reinterpret_cast<FreeBlock *>(header);
+
+    block->right = free_lists_[idx];
+    free_lists_[idx] = block;
+
+    allocated_ -= actual_size;
+    free_blocks_++;
+    return {};
+  }
+
+  auto *block_addr = reinterpret_cast<std::byte *>(header);
 
   auto *freed = new (block_addr) FreeBlock{.size = actual_size,
                                            .parent = nil_,
@@ -274,48 +282,25 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t size)
   free_blocks_++;
   allocated_ -= actual_size;
 
-  // Coalesce
-  // Check predecessor
   auto *prev = predecessor(freed);
   if (prev != nil_) {
     auto *prev_end = reinterpret_cast<std::byte *>(prev) + prev->size;
     if (prev_end == reinterpret_cast<std::byte *>(freed)) {
-      // Coalesce prev and freed
-      // We extend prev to cover freed.
-      // Remove freed from tree? No, remove prev and freed and insert new?
-      // Simpler: Remove both, update prev, insert prev.
-      // Or just update prev size and `fix_up_max`?
-      // Using RB tree, changing key (size doesn't affect key, Address does)
-      // Address of prev doesn't change.
-      // Size changes -> `subtree_max` changes.
-      // So we can keep `prev` in tree, just update size and call
-      // `update_max(prev)`. And we MUST remove `freed` from tree.
-
-      delete_node(freed); // Freed is gone from tree
-
+      delete_node(freed);
       prev->size += freed->size;
       update_max(prev);
-
       free_blocks_--;
-      freed = prev; // Update freed to point to the merged block for next step
+      freed = prev;
     }
   }
 
-  // Check successor
   auto *succ = successor(freed);
   if (succ != nil_) {
     auto *freed_end = reinterpret_cast<std::byte *>(freed) + freed->size;
     if (freed_end == reinterpret_cast<std::byte *>(succ)) {
-      // Coalesce freed and succ
-      // We extend freed to cover succ.
-      // succ is removed.
-      // freed stays (key address is same).
-
       delete_node(succ);
-
       freed->size += succ->size;
       update_max(freed);
-
       free_blocks_--;
     }
   }
@@ -343,6 +328,10 @@ auto FreeListAllocator::free_block_count() const noexcept -> std::size_t {
 
 auto FreeListAllocator::capacity() const noexcept -> std::size_t {
   return arena_.capacity();
+}
+
+auto FreeListAllocator::base() const noexcept -> std::byte * {
+  return arena_.base();
 }
 
 // --- RB Tree Implementation ---

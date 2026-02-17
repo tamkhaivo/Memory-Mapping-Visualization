@@ -28,6 +28,13 @@ struct BlockMetadata {
   }
 };
 
+struct AllocationHeader {
+  std::size_t size;
+  std::size_t magic;
+  char tag[32];
+  static constexpr std::size_t kMagicValue = 0xAC1DCAFEDEADBEEF;
+};
+
 /// @brief Type of allocation event.
 enum class EventType : std::uint8_t {
   Allocate,

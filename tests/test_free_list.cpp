@@ -27,7 +27,8 @@ TEST_F(FreeListTest, SingleAllocation) {
   auto result = alloc_->allocate(128);
   ASSERT_TRUE(result.has_value());
   EXPECT_NE(result->ptr, nullptr);
-  EXPECT_EQ(result->actual_size, 128u);
+  // Expect size to include header overhead (48 bytes).
+  EXPECT_GE(result->actual_size, 128u + 48u);
   EXPECT_GT(alloc_->bytes_allocated(), 0u);
 }
 

@@ -87,6 +87,9 @@ public:
   /// @brief Total capacity of the backing arena.
   [[nodiscard]] auto capacity() const noexcept -> std::size_t;
 
+  /// @brief Base address of the arena.
+  [[nodiscard]] auto base() const noexcept -> std::byte *;
+
 private:
   enum class Color : bool { Red, Black };
 
@@ -126,6 +129,14 @@ private:
   Arena &arena_;
   FreeBlock *root_ = nullptr; ///< Root of the address-ordered RB tree.
   FreeBlock *nil_;            ///< Sentinel node for leaves.
+
+  // Segregated Free Lists for small allocations (O(1))
+  static constexpr std::size_t kSmallBlockQuantum = 16;
+  static constexpr std::size_t kNumSmallClasses = 8;
+  static constexpr std::size_t kMaxSmallBlockSize =
+      kSmallBlockQuantum * kNumSmallClasses;
+
+  FreeBlock *free_lists_[kNumSmallClasses];
 
   std::size_t allocated_ = 0;
   std::size_t free_blocks_ = 0;

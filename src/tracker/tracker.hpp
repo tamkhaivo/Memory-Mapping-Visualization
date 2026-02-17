@@ -59,13 +59,11 @@ private:
   auto make_event(EventType type, BlockMetadata block) -> AllocationEvent;
 
   FreeListAllocator &allocator_;
-  std::pmr::unsynchronized_pool_resource pool_;
-  std::pmr::unordered_map<std::size_t, BlockMetadata>
-      active_blocks_; ///< Keyed by offset.
   std::vector<AllocationEvent> event_log_;
   EventCallback callback_;
   std::size_t sampling_;
   std::size_t next_event_id_ = 0;
+  std::size_t active_block_count_ = 0;
 };
 
 } // namespace mmap_viz
