@@ -19,7 +19,7 @@ struct BlockMetadata {
   std::size_t alignment;   ///< Requested alignment.
   std::size_t actual_size; ///< Size including alignment padding.
   char tag[32] = {};       ///< Optional label (fixed buffer to avoid malloc).
-  std::chrono::steady_clock::time_point timestamp; ///< When the event occurred.
+  std::chrono::system_clock::time_point timestamp; ///< When the event occurred.
 
   void set_tag(std::string_view t) {
     std::size_t len = std::min(t.size(), sizeof(tag) - 1);
@@ -29,7 +29,8 @@ struct BlockMetadata {
 };
 
 struct AllocationHeader {
-  std::size_t size;
+  std::size_t size;        ///< Requested user size.
+  std::size_t actual_size; ///< Full block size (metadata + padding + user).
   std::size_t magic;
   char tag[32];
   static constexpr std::size_t kMagicValue = 0xAC1DCAFEDEADBEEF;

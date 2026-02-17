@@ -3,19 +3,93 @@
 /// Address-Ordered Red-Black Tree.
 
 #include "allocator/free_list.hpp"
-#include "allocator/arena.hpp"
-#include "tracker/block_metadata.hpp"
-
-#include <algorithm>
-#include <bit>
+#include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
-#include <new>
 
 namespace mmap_viz {
 
+struct OpLogEntry {
+  const char *op;
+  void *node;
+  void *parent;
+  void *left;
+  void *right;
+  std::size_t size;
+};
+
+// Simple circular log per allocator
+static constexpr int kMaxLog = 256;
+struct AllocLog {
+  OpLogEntry entries[kMaxLog];
+  int tail = 0;
+  void add(const char *op, void *n, void *p, void *l, void *r, std::size_t s) {
+    entries[tail % kMaxLog] = {op, n, p, l, r, s};
+    tail++;
+  }
+  void dump() {
+    std::fprintf(stderr, "--- OP LOG DUMP ---\n");
+    int count = std::min(tail, kMaxLog);
+    int start = (tail > kMaxLog) ? (tail % kMaxLog) : 0;
+    for (int i = 0; i < count; ++i) {
+      int idx = (start + i) % kMaxLog;
+      auto &e = entries[idx];
+      std::fprintf(stderr, "[%d] %s: node=%p p=%p l=%p r=%p size=%zu\n", idx,
+                   e.op, e.node, e.parent, e.left, e.right, e.size);
+    }
+  }
+};
+// Use a map to track logs per allocator instance (since we can't edit header
+// easily) Actually, I'll just add it as a thread-local for now since we are in
+// a stress test where each thread has its own allocator.
+thread_local AllocLog g_log;
+
+#define ASSERT_NOT_NULL(ptr)                                                   \
+  if ((ptr) == nullptr) {                                                      \
+    std::fprintf(stderr, "FATAL: nullptr encountered in RB-Tree! %s:%d\n",     \
+                 __FILE__, __LINE__);                                          \
+    std::fflush(stderr);                                                       \
+    g_log.dump();                                                              \
+    std::fflush(stderr);                                                       \
+    std::abort();                                                              \
+  }
+
+#ifndef ASSERT_NOT_NULL
+#define ASSERT_NOT_NULL(ptr)                                                   \
+  if ((ptr) == nullptr) {                                                      \
+    std::fprintf(stderr, "FATAL: nullptr encountered in RB-Tree! %s:%d\n",     \
+                 __FILE__, __LINE__);                                          \
+    std::fflush(stderr);                                                       \
+    g_log.dump();                                                              \
+    std::fflush(stderr);                                                       \
+    std::abort();                                                              \
+  }
+#endif
+
+#define SET_PARENT(n, p)                                                       \
+  do {                                                                         \
+    ASSERT_NOT_NULL(p);                                                        \
+    if ((n) != nil_)                                                           \
+      (n)->parent = (p);                                                       \
+  } while (0)
+#define SET_LEFT(n, l)                                                         \
+  do {                                                                         \
+    ASSERT_NOT_NULL(n);                                                        \
+    ASSERT_NOT_NULL(l);                                                        \
+    (n)->left = (l);                                                           \
+  } while (0)
+#define SET_RIGHT(n, r)                                                        \
+  do {                                                                         \
+    ASSERT_NOT_NULL(n);                                                        \
+    ASSERT_NOT_NULL(r);                                                        \
+    (n)->right = (r);                                                          \
+  } while (0)
+
 FreeListAllocator::FreeListAllocator(std::byte *base, std::size_t size) noexcept
     : base_{base}, size_{size} {
+  static_assert(sizeof(FreeBlock) <= 48, "FreeBlock too large");
   // Initialize sentinel node for leaves.
   // We allocate it from the arena? No, that's messy.
   // We can just use a static instance or a member instance?
@@ -73,69 +147,52 @@ FreeListAllocator::FreeListAllocator(std::byte *base, std::size_t size) noexcept
 
 auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
     -> std::expected<AllocationResult, AllocError> {
-  if (size == 0) {
+  if (size == 0)
     size = 1;
-  }
 
-  if (!std::has_single_bit(alignment)) {
-    return std::unexpected(AllocError::InvalidAlignment);
-  }
+  // Enforce 16-byte alignment for internal structural integrity.
+  // All FreeBlock headers MUST be 16-byte aligned.
+  std::size_t internal_align = std::max(alignment, std::size_t(16));
+  std::size_t internal_size = (size + 15) & ~std::size_t(15);
 
-  // Reserve space for Intrusive Header
-  const std::size_t header_size = sizeof(AllocationHeader);
-  const std::size_t total_request = size + header_size;
+  // 1. Check small block segregated lists first
+  if (internal_size <= kMaxSmallBlockSize &&
+      internal_size >= kSmallBlockQuantum) {
+    std::size_t idx = (internal_size / kSmallBlockQuantum) - 1;
+    if (idx < kNumSmallClasses && free_lists_[idx]) {
+      auto *node = free_lists_[idx];
+      free_lists_[idx] = node->next;
 
-  // 1. Try Segregated Free List
-  if (total_request <= kMaxSmallBlockSize && alignment <= kSmallBlockQuantum) {
-    auto quantized_size =
-        (total_request + kSmallBlockQuantum - 1) & ~(kSmallBlockQuantum - 1);
-    std::size_t idx = (quantized_size / kSmallBlockQuantum) - 1;
-
-    if (free_lists_[idx] != nullptr) {
-      FreeNode *block = free_lists_[idx];
-      free_lists_[idx] = block->next;
-
+      allocated_ += internal_size;
       free_blocks_--;
-      allocated_ += quantized_size;
-
-      std::memset(block, 0, quantized_size);
-
-      auto *header = reinterpret_cast<AllocationHeader *>(block);
-      header->size = quantized_size;
-      header->magic = AllocationHeader::kMagicValue;
 
       return AllocationResult{
-          .ptr = reinterpret_cast<std::byte *>(block) + header_size,
+          .ptr = reinterpret_cast<std::byte *>(node),
           .offset = static_cast<std::size_t>(
-              reinterpret_cast<std::byte *>(block) - base_),
-          .actual_size = quantized_size,
+              reinterpret_cast<std::byte *>(node) - base_),
+          .actual_size = internal_size,
       };
     }
   }
 
-  // 2. Tree Allocation
-  auto min_size = total_request;
-  if (total_request > kMaxSmallBlockSize) {
-    min_size = std::max(total_request, kMinBlockSize);
-  } else {
-    min_size = std::max(total_request, std::size_t{16});
-  }
-
+  // 2. Search Red-Black Tree for first-fit
+  std::size_t min_size = std::max(internal_size, kMinBlockSize);
   auto *curr = find_first_fit(min_size);
 
   while (curr != nil_) {
     auto *block_start = reinterpret_cast<std::byte *>(curr);
 
-    // Check alignment for PAYLOAD (after header)
-    void *aligned_ptr = block_start + header_size;
-    std::size_t space = curr->size - header_size;
+    // Check alignment for PAYLOAD (which is the entire block now)
+    void *aligned_ptr = block_start;
+    std::size_t space = curr->size;
 
-    if (std::align(alignment, size, aligned_ptr, space)) {
+    if (std::align(internal_align, internal_size, aligned_ptr, space)) {
       // It fits!
-      auto *user_ptr = static_cast<std::byte *>(aligned_ptr);
-      auto *header_ptr = user_ptr - header_size;
+      auto *header_ptr =
+          static_cast<std::byte *>(aligned_ptr); // The returned pointer
       auto pre_padding = static_cast<std::size_t>(header_ptr - block_start);
 
+      std::size_t total_block_size = curr->size;
       delete_node(curr);
 
       // Handle Pre-Padding
@@ -149,6 +206,7 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
           node->next = free_lists_[idx];
           free_lists_[idx] = node;
         } else {
+          ASSERT_NOT_NULL(nil_);
           gap_block->parent = nil_;
           gap_block->left = nil_;
           gap_block->right = nil_;
@@ -159,23 +217,12 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
       }
 
       // Handle Remainder
-      std::size_t actual_used_size = size + header_size;
-
-      // Quantize used size if small
-      if (actual_used_size <= kMaxSmallBlockSize) {
-        auto quantized = (actual_used_size + kSmallBlockQuantum - 1) &
-                         ~(kSmallBlockQuantum - 1);
-        if (curr->size - pre_padding >= quantized) {
-          actual_used_size = quantized;
-        }
-      }
-
       std::size_t remainder_size =
-          (curr->size - pre_padding) - actual_used_size;
+          (total_block_size - pre_padding) - internal_size;
 
       bool absorbed = false;
       if (remainder_size >= kMinBlockSize) {
-        auto *new_free = new (header_ptr + actual_used_size)
+        auto *new_free = new (header_ptr + internal_size)
             FreeBlock{.size = remainder_size,
                       .parent = nil_,
                       .left = nil_,
@@ -186,8 +233,7 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
       } else if (remainder_size >= kSmallBlockQuantum) {
         if (remainder_size <= kMaxSmallBlockSize) {
           std::size_t idx = (remainder_size / kSmallBlockQuantum) - 1;
-          auto *node =
-              reinterpret_cast<FreeNode *>(header_ptr + actual_used_size);
+          auto *node = reinterpret_cast<FreeNode *>(header_ptr + internal_size);
           node->next = free_lists_[idx];
           free_lists_[idx] = node;
         } else {
@@ -198,22 +244,17 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
       }
 
       if (absorbed) {
-        actual_used_size += remainder_size;
+        internal_size += remainder_size;
         free_blocks_--;
       }
 
-      allocated_ += actual_used_size;
+      allocated_ += internal_size;
 
-      auto *header = reinterpret_cast<AllocationHeader *>(header_ptr);
-      header->size = actual_used_size;
-      header->magic = AllocationHeader::kMagicValue;
-
-      std::memset(user_ptr, 0, actual_used_size - header_size);
-
+      verify_tree(root_);
       return AllocationResult{
-          .ptr = user_ptr,
+          .ptr = header_ptr,
           .offset = static_cast<std::size_t>(header_ptr - base_),
-          .actual_size = actual_used_size,
+          .actual_size = internal_size,
       };
     }
 
@@ -226,7 +267,7 @@ auto FreeListAllocator::allocate(std::size_t size, std::size_t alignment)
   return std::unexpected(AllocError::OutOfMemory);
 }
 
-auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
+auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t size)
     -> std::expected<void, AllocError> {
   if (ptr == nullptr)
     return {};
@@ -238,25 +279,28 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
     return std::unexpected(AllocError::BadPointer);
   }
 
-  const std::size_t header_size = sizeof(AllocationHeader);
-  auto *header = reinterpret_cast<AllocationHeader *>(ptr - header_size);
-
-  if (reinterpret_cast<std::byte *>(header) < base) {
-    return std::unexpected(AllocError::BadPointer);
+  std::size_t remaining_space = static_cast<std::size_t>(end - ptr);
+  if (size > remaining_space || size < kSmallBlockQuantum) {
+    std::fprintf(stderr,
+                 "FATAL: deallocate with invalid size %zu (remaining=%zu)\n",
+                 size, remaining_space);
+    std::fflush(stderr);
+    std::abort();
   }
 
-  if (header->magic != AllocationHeader::kMagicValue) {
-    return std::unexpected(AllocError::BadPointer);
+  if (reinterpret_cast<std::uintptr_t>(ptr) % 16 != 0) {
+    return std::unexpected(AllocError::InvalidAlignment);
   }
 
-  std::size_t actual_size = header->size;
+  std::size_t actual_size = size;
+  // No header to find. 'ptr' is the start of the block.
 
   if (actual_size <= kMaxSmallBlockSize) {
     std::size_t idx = (actual_size / kSmallBlockQuantum) - 1;
     if (idx >= kNumSmallClasses)
       idx = kNumSmallClasses - 1;
 
-    auto *block = reinterpret_cast<FreeNode *>(header);
+    auto *block = reinterpret_cast<FreeNode *>(ptr);
 
     block->next = free_lists_[idx];
     free_lists_[idx] = block;
@@ -266,7 +310,18 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
     return {};
   }
 
-  auto *block_addr = reinterpret_cast<std::byte *>(header);
+  // Ensure block is large enough for RB metadata
+  if (actual_size < kMinBlockSize) {
+    std::size_t idx = kNumSmallClasses - 1;
+    auto *block = reinterpret_cast<FreeNode *>(ptr);
+    block->next = free_lists_[idx];
+    free_lists_[idx] = block;
+    allocated_ -= actual_size;
+    free_blocks_++;
+    return {};
+  }
+
+  auto *block_addr = ptr;
 
   // 1. Find potential neighbors in address-ordered tree
   // We insert a temporary node to find predecessor/successor
@@ -287,6 +342,13 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
     auto *freed_end = reinterpret_cast<std::byte *>(freed) + freed->size;
     if (freed_end == reinterpret_cast<std::byte *>(succ)) {
       std::size_t succ_size = succ->size;
+      if (succ_size > size_ || succ_size == 0) {
+        std::fprintf(stderr, "FATAL: coalescing with garbage succ_size %zu\n",
+                     succ_size);
+        std::fflush(stderr);
+        g_log.dump();
+        std::abort();
+      }
       delete_node(succ);
       freed->size += succ_size;
       update_max_upwards(freed);
@@ -300,6 +362,13 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
     auto *prev_end = reinterpret_cast<std::byte *>(prev) + prev->size;
     if (prev_end == reinterpret_cast<std::byte *>(freed)) {
       std::size_t freed_size = freed->size;
+      if (freed_size > size_ || freed_size == 0) {
+        std::fprintf(stderr, "FATAL: coalescing with garbage freed_size %zu\n",
+                     freed_size);
+        std::fflush(stderr);
+        g_log.dump();
+        std::abort();
+      }
       delete_node(freed);
       prev->size += freed_size;
       update_max_upwards(prev);
@@ -307,6 +376,7 @@ auto FreeListAllocator::deallocate(std::byte *ptr, std::size_t /*size_hint*/)
     }
   }
 
+  verify_tree(root_);
   return {};
 }
 
@@ -338,96 +408,120 @@ auto FreeListAllocator::base() const noexcept -> std::byte * { return base_; }
 
 void FreeListAllocator::left_rotate(FreeBlock *x) {
   FreeBlock *y = x->right;
-  x->right = y->left;
+  ASSERT_NOT_NULL(y);
+  SET_RIGHT(x, y->left);
   if (y->left != nil_) {
-    y->left->parent = x;
+    SET_PARENT(y->left, x);
   }
-  y->parent = x->parent;
+  SET_PARENT(y, x->parent);
   if (x->parent == nil_) {
     root_ = y;
   } else if (x == x->parent->left) {
-    x->parent->left = y;
+    SET_LEFT(x->parent, y);
   } else {
-    x->parent->right = y;
+    SET_RIGHT(x->parent, y);
   }
-  y->left = x;
-  x->parent = y;
+  SET_LEFT(y, x);
+  SET_PARENT(x, y);
 
-  // Update max
-  y->subtree_max = x->subtree_max; // y takes x's place, inherits max
-  update_max(x);                   // x is now child, recalculate its max
-  // Note: y's max is set to what x HAD. But x's max might perform partial
-  // update. Strictly: `update_max(x)` then `update_max(y)` is cleaner.
-  // Optimization: y's subtree max is `max(y->size, y->left->max,
-  // y->right->max)`. Since x is y->left, x must be updated first.
+  g_log.add("left_rotate", x, x->parent, x->left, x->right, x->size);
+
+  // Update max. Note: y's max becomes what x's was, then we re-derive.
+  y->subtree_max = x->subtree_max;
+  update_max(x);
   update_max(y);
 }
 
 void FreeListAllocator::right_rotate(FreeBlock *x) {
   FreeBlock *y = x->left;
-  x->left = y->right;
+  ASSERT_NOT_NULL(y);
+  SET_LEFT(x, y->right);
   if (y->right != nil_) {
-    y->right->parent = x;
+    SET_PARENT(y->right, x);
   }
-  y->parent = x->parent;
+  SET_PARENT(y, x->parent);
   if (x->parent == nil_) {
     root_ = y;
   } else if (x == x->parent->right) {
-    x->parent->right = y;
+    SET_RIGHT(x->parent, y);
   } else {
-    x->parent->left = y;
+    SET_LEFT(x->parent, y);
   }
-  y->right = x;
-  x->parent = y;
+  SET_RIGHT(y, x);
+  SET_PARENT(x, y);
 
-  // Update max
+  g_log.add("right_rotate", x, x->parent, x->left, x->right, x->size);
+
+  // Update max. Note: y's max becomes what x's was, then we re-derive.
   y->subtree_max = x->subtree_max;
   update_max(x);
   update_max(y);
 }
 
 void FreeListAllocator::insert_node(FreeBlock *z) {
+  if (z == nullptr || z == nil_)
+    return;
+
+  if (z->size > 1024 * 1024 * 1024 || z->size == 0) {
+    std::fprintf(stderr, "FATAL: insert_node with garbage size %zu at %p\n",
+                 z->size, (void *)z);
+    std::fflush(stderr);
+    g_log.dump();
+    std::fflush(stderr);
+    std::abort();
+  }
+
+  if (reinterpret_cast<std::uintptr_t>(z) % 16 != 0) {
+    std::fprintf(stderr,
+                 "RB-Tree Error: insert_node with misaligned pointer %p\n",
+                 (void *)z);
+    g_log.dump();
+    std::abort();
+  }
+
   FreeBlock *y = nil_;
   FreeBlock *x = root_;
 
   // Key is Address
   while (x != nil_) {
+    ASSERT_NOT_NULL(x);
     y = x;
-    // Check alignment / address order
-    // if z < x
     if (z < x) {
-      x->subtree_max =
-          std::max(x->subtree_max, z->size); // Update max on the way down?
       x = x->left;
     } else {
-      x->subtree_max = std::max(x->subtree_max, z->size);
       x = x->right;
     }
   }
 
+  ASSERT_NOT_NULL(y);
   z->parent = y;
   if (y == nil_) {
     root_ = z;
   } else if (z < y) {
+    ASSERT_NOT_NULL(z);
     y->left = z;
   } else {
+    ASSERT_NOT_NULL(z);
     y->right = z;
   }
 
+  ASSERT_NOT_NULL(nil_);
   z->left = nil_;
   z->right = nil_;
   z->color = Color::Red;
   z->subtree_max = z->size;
 
-  // Fixup max upwards? We did it on the way down.
-  // But rotation might mess it up? No, rotations handle their own local max.
-  // But `rb_insert_fixup` does rotations.
+  g_log.add("insert_node", z, z->parent, z->left, z->right, z->size);
+
+  update_max_upwards(z);
 
   rb_insert_fixup(z);
 }
 
 void FreeListAllocator::rb_insert_fixup(FreeBlock *z) {
-  while (z->parent->color == Color::Red) {
+  while (z != nullptr && z->parent != nullptr &&
+         z->parent->color == Color::Red) {
+    ASSERT_NOT_NULL(z->parent->parent);
     if (z->parent == z->parent->parent->left) {
       FreeBlock *y = z->parent->parent->right;
       if (y->color == Color::Red) {
@@ -469,13 +563,12 @@ void FreeListAllocator::rb_transplant(FreeBlock *u, FreeBlock *v) {
   if (u->parent == nil_) {
     root_ = v;
   } else if (u == u->parent->left) {
-    u->parent->left = v;
+    SET_LEFT(u->parent, v);
   } else {
-    u->parent->right = v;
+    SET_RIGHT(u->parent, v);
   }
-  if (v != nil_) { // Standard CLRS says `v.p = u.p`. Nil parent is usually
-                   // ignored, but our nil has a parent?
-    v->parent = u->parent;
+  if (v != nil_) {
+    SET_PARENT(v, u->parent);
   }
 }
 
@@ -492,12 +585,16 @@ void FreeListAllocator::delete_node(FreeBlock *z) {
   // The path from the replaced node upwards needs update.
   FreeBlock *fix_start = nullptr;
 
+  FreeBlock *x_parent = nil_;
+
   if (z->left == nil_) {
     x = z->right;
+    x_parent = z->parent;
     rb_transplant(z, z->right);
-    fix_start = z->parent; // z is gone, parent is where we start updating max
+    fix_start = z->parent;
   } else if (z->right == nil_) {
     x = z->left;
+    x_parent = z->parent;
     rb_transplant(z, z->left);
     fix_start = z->parent;
   } else {
@@ -505,34 +602,26 @@ void FreeListAllocator::delete_node(FreeBlock *z) {
     y_original_color = y->color;
     x = y->right;
 
-    // y is moving to z's spot.
-    // x moves to y's old spot.
-    // fix_start should be y's old parent?
     if (y->parent == z) {
-      if (x != nil_)
-        x->parent = y; // x parent set in transplant usually?
-      // CLRS special case
+      x_parent = y;
       fix_start = y;
     } else {
+      x_parent = y->parent;
       rb_transplant(y, y->right);
-      y->right = z->right;
-      y->right->parent = y;
-      fix_start = y->parent; // Old parent of y.
+      SET_RIGHT(y, z->right);
+      SET_PARENT(y->right, y);
+      fix_start = y->parent;
     }
 
     rb_transplant(z, y);
-    y->left = z->left;
-    y->left->parent = y;
+    SET_LEFT(y, z->left);
+    SET_PARENT(y->left, y);
     y->color = z->color;
-
-    // y takes z's spot, so it acts like z.
-    // We need to update y's max because its children changed.
-    // And we need to update fix_start upwards.
   }
 
+  g_log.add("delete_node", z, z->parent, z->left, z->right, z->size);
+
   // First, update max for the node that replaced z (if it wasn't spliced out)
-  // Actually, we just need to retrace from where the structural change
-  // happened. If y moved, we update y.
   if (y != z) {
     update_max(y);
   }
@@ -545,63 +634,70 @@ void FreeListAllocator::delete_node(FreeBlock *z) {
   }
 
   if (y_original_color == Color::Black) {
-    rb_delete_fixup(x);
+    rb_delete_fixup(x, x_parent);
   }
 }
 
-void FreeListAllocator::rb_delete_fixup(FreeBlock *x) {
-  while (x != root_ && x->color == Color::Black) {
-    if (x == x->parent->left) {
-      FreeBlock *w = x->parent->right;
+void FreeListAllocator::rb_delete_fixup(FreeBlock *x, FreeBlock *x_parent) {
+  while (x != root_ &&
+         (x == nil_ || (x != nullptr && x->color == Color::Black))) {
+    ASSERT_NOT_NULL(x_parent);
+    if (x == x_parent->left) {
+      FreeBlock *w = x_parent->right;
       if (w->color == Color::Red) {
         w->color = Color::Black;
-        x->parent->color = Color::Red;
-        left_rotate(x->parent);
-        w = x->parent->right;
+        x_parent->color = Color::Red;
+        left_rotate(x_parent);
+        w = x_parent->right;
       }
       if (w->left->color == Color::Black && w->right->color == Color::Black) {
-        w->color = Color::Red;
-        x = x->parent;
+        if (w != nil_)
+          w->color = Color::Red;
+        x = x_parent;
+        x_parent = x->parent;
       } else {
         if (w->right->color == Color::Black) {
           w->left->color = Color::Black;
           w->color = Color::Red;
           right_rotate(w);
-          w = x->parent->right;
+          w = x_parent->right;
         }
-        w->color = x->parent->color;
-        x->parent->color = Color::Black;
+        w->color = x_parent->color;
+        x_parent->color = Color::Black;
         w->right->color = Color::Black;
-        left_rotate(x->parent);
+        left_rotate(x_parent);
         x = root_;
       }
     } else {
-      FreeBlock *w = x->parent->left;
+      FreeBlock *w = x_parent->left;
       if (w->color == Color::Red) {
         w->color = Color::Black;
-        x->parent->color = Color::Red;
-        right_rotate(x->parent);
-        w = x->parent->left;
+        x_parent->color = Color::Red;
+        right_rotate(x_parent);
+        w = x_parent->left;
       }
       if (w->right->color == Color::Black && w->left->color == Color::Black) {
-        w->color = Color::Red;
-        x = x->parent;
+        if (w != nil_)
+          w->color = Color::Red;
+        x = x_parent;
+        x_parent = x->parent;
       } else {
         if (w->left->color == Color::Black) {
           w->right->color = Color::Black;
           w->color = Color::Red;
           left_rotate(w);
-          w = x->parent->left;
+          w = x_parent->left;
         }
-        w->color = x->parent->color;
-        x->parent->color = Color::Black;
+        w->color = x_parent->color;
+        x_parent->color = Color::Black;
         w->left->color = Color::Black;
-        right_rotate(x->parent);
+        right_rotate(x_parent);
         x = root_;
       }
     }
   }
-  x->color = Color::Black;
+  if (x != nil_)
+    x->color = Color::Black;
 }
 
 auto FreeListAllocator::minimum(FreeBlock *x) const -> FreeBlock * {
@@ -703,6 +799,56 @@ auto FreeListAllocator::find_first_fit(std::size_t size) const -> FreeBlock * {
   }
 
   return nil_;
+}
+
+void FreeListAllocator::verify_tree(FreeBlock *x) const {
+  if (x == nil_ || x == nullptr)
+    return;
+
+  if (reinterpret_cast<std::uintptr_t>(x) % 16 != 0) {
+    std::fprintf(stderr, "RB-Tree Error: node %p is NOT 16-byte aligned\n",
+                 (void *)x);
+    g_log.dump();
+    std::abort();
+  }
+
+  if (x->left != nil_) {
+    if (x->left->parent != x) {
+      std::fprintf(stderr,
+                   "RB-Tree Error: x->left->parent != x. x=%p, x->left=%p, "
+                   "x->left->parent=%p\n",
+                   (void *)x, (void *)x->left, (void *)x->left->parent);
+      g_log.dump();
+      std::abort();
+    }
+    verify_tree(x->left);
+  }
+  if (x->right != nil_) {
+    if (x->right->parent != x) {
+      std::fprintf(stderr,
+                   "RB-Tree Error: x->right->parent != x. x=%p, x->right=%p, "
+                   "x->right->parent=%p\n",
+                   (void *)x, (void *)x->right, (void *)x->right->parent);
+      g_log.dump();
+      std::abort();
+    }
+    verify_tree(x->right);
+  }
+  std::size_t expected_max = x->size;
+  if (x->left != nil_)
+    expected_max = std::max(expected_max, x->left->subtree_max);
+  if (x->right != nil_)
+    expected_max = std::max(expected_max, x->right->subtree_max);
+  if (x->subtree_max != expected_max) {
+    std::fprintf(
+        stderr,
+        "RB-Tree Error: subtree_max mismatch. x=%p, size=%zu, left->max=%zu, "
+        "right->max=%zu, x->subtree_max=%zu, expected=%zu\n",
+        (void *)x, x->size, (x->left != nil_ ? x->left->subtree_max : 0),
+        (x->right != nil_ ? x->right->subtree_max : 0), x->subtree_max,
+        expected_max);
+    std::abort();
+  }
 }
 
 } // namespace mmap_viz

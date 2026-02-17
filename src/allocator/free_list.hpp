@@ -91,6 +91,12 @@ public:
   /// @brief Base address of the arena.
   [[nodiscard]] auto base() const noexcept -> std::byte *;
 
+  /// @brief Check if this allocator owns the given pointer.
+  [[nodiscard]] bool contains(const void *ptr) const noexcept {
+    const auto *p = reinterpret_cast<const std::byte *>(ptr);
+    return p >= base_ && p < base_ + size_;
+  }
+
 private:
   enum class Color : bool { Red, Black };
 
@@ -112,7 +118,7 @@ private:
   void delete_node(FreeBlock *z);
   void rb_transplant(FreeBlock *u, FreeBlock *v);
   void rb_insert_fixup(FreeBlock *z);
-  void rb_delete_fixup(FreeBlock *x);
+  void rb_delete_fixup(FreeBlock *x, FreeBlock *x_parent);
   void left_rotate(FreeBlock *x);
   void right_rotate(FreeBlock *x);
 
@@ -144,6 +150,8 @@ private:
   };
 
   FreeNode *free_lists_[kNumSmallClasses];
+
+  void verify_tree(FreeBlock *x) const;
 
   std::size_t allocated_ = 0;
   std::size_t free_blocks_ = 0;

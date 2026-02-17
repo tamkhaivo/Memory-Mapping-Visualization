@@ -155,9 +155,12 @@ auto WsSession::mime_type(const std::string &path) -> std::string {
 
 WsServer::WsServer(unsigned short port, std::string web_root,
                    SnapshotProvider provider)
-    : acceptor_{ioc_, tcp::endpoint{tcp::v4(), port}},
-      web_root_{std::move(web_root)}, snapshot_provider_{std::move(provider)} {
+    : acceptor_{ioc_}, web_root_{std::move(web_root)},
+      snapshot_provider_{std::move(provider)} {
+  acceptor_.open(tcp::v4());
   acceptor_.set_option(net::socket_base::reuse_address(true));
+  acceptor_.bind(tcp::endpoint{tcp::v4(), port});
+  acceptor_.listen();
 }
 
 void WsServer::run() {

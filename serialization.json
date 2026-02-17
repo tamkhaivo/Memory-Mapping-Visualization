@@ -1,6 +1,6 @@
 {
   "context": {
-    "date": "2026-02-16T21:54:38-08:00",
+    "date": "2026-02-16T23:22:29-08:00",
     "host_name": "tvos-MacBook-Pro-5.local",
     "executable": "./build-rel/memory_mapper_bench_serialization",
     "num_cpus": 8,
@@ -26,7 +26,7 @@
         "num_sharing": 1
       }
     ],
-    "load_avg": [22.332,16.7412,9.93652],
+    "load_avg": [4.33203,4.99268,4.80371],
     "library_version": "v1.9.5",
     "library_build_type": "release",
     "json_schema_version": 1
@@ -41,9 +41,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 204886,
-      "real_time": 3.4208919838355769e+03,
-      "cpu_time": 3.4001981589762099e+03,
+      "iterations": 160701,
+      "real_time": 4.3773161522296532e+03,
+      "cpu_time": 4.3609062793635394e+03,
       "time_unit": "ns"
     },
     {
@@ -55,9 +55,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 19964,
-      "real_time": 3.5254261821175416e+04,
-      "cpu_time": 3.4986425566018843e+04,
+      "iterations": 15671,
+      "real_time": 4.8062448153981502e+04,
+      "cpu_time": 4.4942377640227176e+04,
       "time_unit": "ns"
     },
     {
@@ -69,9 +69,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 1985,
-      "real_time": 3.4992130529264489e+05,
-      "cpu_time": 3.4738387909319927e+05,
+      "iterations": 1577,
+      "real_time": 4.4410238300477312e+05,
+      "cpu_time": 4.4223842739378597e+05,
       "time_unit": "ns"
     },
     {
@@ -83,9 +83,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 199,
-      "real_time": 3.5069675477872128e+06,
-      "cpu_time": 3.4811155778894471e+06,
+      "iterations": 157,
+      "real_time": 4.4687539809917333e+06,
+      "cpu_time": 4.4463694267515866e+06,
       "time_unit": "ns"
     }
   ]

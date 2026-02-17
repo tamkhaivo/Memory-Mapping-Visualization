@@ -186,8 +186,13 @@ auto VisualizationArena::Impl::event_log_json() const -> std::string {
 auto VisualizationArena::create(ArenaConfig cfg)
     -> std::expected<VisualizationArena, std::error_code> {
 
+  // Ensure total capacity is a multiple of 16 * kMaxShards for shard alignment
+  std::size_t alignment_quantum = 16 * kMaxShards;
+  std::size_t aligned_arena_size =
+      (cfg.arena_size + alignment_quantum - 1) & ~(alignment_quantum - 1);
+
   // 1. Create the mmap-backed arena.
-  auto arena_result = Arena::create(cfg.arena_size);
+  auto arena_result = Arena::create(aligned_arena_size);
   if (!arena_result.has_value()) {
     return std::unexpected(arena_result.error());
   }
@@ -383,10 +388,14 @@ void VisualizationArena::init_tls_context() {
 }
 
 auto VisualizationArena::get_shard_idx(void *ptr) const -> std::size_t {
-  auto offset = static_cast<std::size_t>(static_cast<std::byte *>(ptr) -
-                                         impl_->arena->base());
+  auto *base = impl_->arena->base();
+  if (ptr < base || ptr >= base + impl_->arena->capacity()) {
+    return kMaxShards; // Out of bounds
+  }
+  auto offset = static_cast<std::size_t>(static_cast<std::byte *>(ptr) - base);
   std::size_t shard_size = impl_->arena->capacity() / kMaxShards;
-  return offset / shard_size;
+  std::size_t idx = offset / shard_size;
+  return (idx >= kMaxShards) ? (kMaxShards - 1) : idx;
 }
 
 // ─── Raw allocation ──────────────────────────────────────────────────────
@@ -414,36 +423,61 @@ auto VisualizationArena::alloc_raw(std::size_t size, std::size_t alignment,
   }
 
   std::size_t offset_to_user = base_overhead + padding;
-  std::size_t total_alloc_size = size + offset_to_user;
+  std::size_t total_request = size + offset_to_user;
 
   std::lock_guard lock(tls_context_->shard->mutex);
-  auto result = allocator->allocate(total_alloc_size, alignment);
+  auto result = allocator->allocate(total_request, alignment);
 
   if (!result.has_value()) {
     return nullptr;
   }
 
   std::byte *raw_ptr = result->ptr;
+  if (raw_ptr) {
+    auto actual_shard_idx = get_shard_idx(raw_ptr);
+    // Find matching shard
+    std::size_t expected_shard_idx = kMaxShards;
+    for (std::size_t i = 0; i < kMaxShards; ++i) {
+      if (impl_->shards[i].get() == tls_context_->shard) {
+        expected_shard_idx = i;
+        break;
+      }
+    }
+    if (expected_shard_idx != kMaxShards &&
+        actual_shard_idx != expected_shard_idx) {
+      std::fprintf(
+          stderr,
+          "FATAL: Shard Mismatch! requested=%zu, received=%zu, ptr=%p\n",
+          expected_shard_idx, actual_shard_idx, (void *)raw_ptr);
+      std::abort();
+    }
+  }
+
   std::byte *user_ptr = raw_ptr + offset_to_user;
 
-  std::uint32_t offset_val = static_cast<std::uint32_t>(offset_to_user);
-  std::memcpy(user_ptr - sizeof(std::uint32_t), &offset_val,
-              sizeof(std::uint32_t));
-
+  // Write header
   auto *header = reinterpret_cast<AllocationHeader *>(raw_ptr);
   header->magic = AllocationHeader::kMagicValue;
-  header->size = total_alloc_size;
+  header->size = size;
+  header->actual_size = result->actual_size;
 
   std::size_t len = std::min(tag.size(), sizeof(header->tag) - 1);
   std::memcpy(header->tag, tag.data(), len);
   header->tag[len] = '\0';
+
+  // Write footer (offset to raw_ptr)
+  *reinterpret_cast<std::uint32_t *>(user_ptr - sizeof(std::uint32_t)) =
+      static_cast<std::uint32_t>(offset_to_user);
+
+  // Initialize user memory
+  std::memset(user_ptr, 0, size);
 
   BlockMetadata meta{
       .offset = result->offset,
       .size = size,
       .alignment = alignment,
       .actual_size = result->actual_size,
-      .timestamp = std::chrono::steady_clock::now(),
+      .timestamp = std::chrono::system_clock::now(),
   };
   meta.set_tag(tag);
   tls_context_->tracker->record_alloc(std::move(meta));
@@ -455,16 +489,30 @@ void VisualizationArena::dealloc_raw(void *ptr, std::size_t size) {
   if (ptr == nullptr)
     return;
 
-  std::uint32_t offset_val = 0;
-  std::byte *user_ptr = static_cast<std::byte *>(ptr);
-  std::memcpy(&offset_val, user_ptr - sizeof(std::uint32_t),
-              sizeof(std::uint32_t));
+  // AllocationHeader is at the start of the block.
+  // We need to find it. How? VisualizationArena assumes alignment and overhead.
+  // Actually, VisualizationArena KNOWS how it allocated.
+  // Base overhead is header + footer (offset).
+  std::size_t base_overhead = sizeof(AllocationHeader) + sizeof(std::uint32_t);
 
+  // Actually, we can just use the footer to find the start of the block!
+  std::byte *user_ptr = static_cast<std::byte *>(ptr);
+  std::uint32_t offset_val =
+      *reinterpret_cast<std::uint32_t *>(user_ptr - sizeof(std::uint32_t));
   std::byte *raw_ptr = user_ptr - offset_val;
   auto *header = reinterpret_cast<AllocationHeader *>(raw_ptr);
 
   if (header->magic != AllocationHeader::kMagicValue) {
-    // Invalid magic
+    return; // Safety check or double free
+  }
+
+  header->magic = 0; // Invalidate to prevent double free
+
+  std::size_t actual_size = header->actual_size;
+
+  if (tls_context_) {
+    auto offset = static_cast<std::size_t>(raw_ptr - impl_->arena->base());
+    tls_context_->tracker->record_dealloc(offset, actual_size);
   }
 
   std::size_t idx = get_shard_idx(raw_ptr);
@@ -473,14 +521,28 @@ void VisualizationArena::dealloc_raw(void *ptr, std::size_t size) {
   }
 
   auto *shard = impl_->shards[idx].get();
+  // Double check shard ownership to prevent tree contamination
+  if (!shard->allocator->contains(raw_ptr)) {
+    std::fprintf(stderr,
+                 "WARNING: Shard hint %zu wrong for ptr %p. Searching...\n",
+                 idx, (void *)raw_ptr);
+    shard = nullptr;
+    for (std::size_t i = 0; i < kMaxShards; ++i) {
+      if (impl_->shards[i] && impl_->shards[i]->allocator->contains(raw_ptr)) {
+        shard = impl_->shards[i].get();
+        idx = i;
+        break;
+      }
+    }
+  }
 
-  if (tls_context_) {
-    auto offset = static_cast<std::size_t>(raw_ptr - impl_->arena->base());
-    tls_context_->tracker->record_dealloc(offset, size);
+  if (!shard) {
+    std::fprintf(stderr, "FATAL: No shard owns pointer %p\n", (void *)raw_ptr);
+    std::abort();
   }
 
   std::lock_guard lock(shard->mutex);
-  (void)shard->allocator->deallocate(raw_ptr, header->size);
+  (void)shard->allocator->deallocate(raw_ptr, actual_size);
 }
 
 // ─── PMR interop ─────────────────────────────────────────────────────────

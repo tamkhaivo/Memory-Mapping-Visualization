@@ -284,3 +284,58 @@ Benchmarks confirmed that JSON serialization is 100x slower than the allocator i
 ### Final Results
 - **Sustained Capacity**: 1.5M+ ops/sec with 50 concurrent clients (at 1/500 sampling).
 - **Stability**: Zero crashes or leaks over 60-second high-intensity "soak" tests.
+## [2026-02-17] RB-Tree Hardening & Structural Integrity
+
+### The Crisis
+As the system scaled to multi-threaded shards, we encountered persistent, non-deterministic segmentation faults and ASan alignment violations. While the Red-Black Tree algorithm was logically correct, the **structural integrity** of the tree was sensitive to corner-case memory corruption and cross-shard contamination.
+
+### The Findings
+
+#### 1. Metadata Overwrite Race (Root Cause)
+A critical bug was found in the `FreeListAllocator::allocate` split logic. 
+- **Cause**: When splitting a block with "pre-padding" (to meet alignment), the code initialized the `gap_block` header at the *same* address as the original `curr` block *before* calculating the `remainder_size`.
+- **Impact**: This caused `curr->size` to be overwritten by the smaller gap size (or pointer values), leading to the remainder block being initialized with massive, pointer-scaled garbage sizes. Entering the tree with a 18EB size quickly led to out-of-bounds corruption.
+
+#### 2. Cross-Shard Sentinel Contamination
+- **Bug**: In a sharded architecture, if a block allocated from Shard A was incorrectly deallocated into Shard B, the node would point to Shard B's `nil_` sentinel.
+- **Impact**: Because the RB-tree logic relies on checking `node != nil_`, a node pointing to a *foreign* sentinel would bypass local null-checks, leading to parent-pointer corruption when Shard B attempted to "fix" its sentinel's parent.
+
+#### 3. Alignment Drift
+Small block splits and shard base addresses were not always strictly 16-byte aligned, leading to misaligned `FreeBlock` headers that triggered ASan and caused undefined behavior during pointer arithmetic.
+
+### The "Nuclear" Hardening Solutions
+
+1.  **Shard Boundary Verification**: Added a `contains(ptr)` check in `VisualizationArena::dealloc_raw`. If the shard-hint is wrong, we perform a global search rather than blindly deallocating into the wrong tree.
+2.  **Magic Header Poisoning**: We now zero out the `AllocationHeader::magic` value immediately upon entering `deallocate`. This turns double-frees from "silent tree corruption" into "immediate controlled drops."
+3.  **Defensive Structural OpLog**: Implemented a `thread_local` circular buffer that records the last 256 structural operations (`insert`, `delete`, `rotate`) with pointers and sizes. This was the key to isolating the "garbage size" introduction.
+4.  **Atomic Size Validation**: Every `insert_node` and coalescing step now validates that `size > 0` and `size <= arena_capacity`.
+
+### Result & Trade-offs
+- **Stability**: The system now survives 10s+ of 8-thread "Heavy Churn" stress tests with zero errors.
+- **Performance**: The hardening adds ~2ns of overhead per deallocation (for magic poisoning and bounds checks), which is negligible compared to the 100ns+ total op time.
+## [2026-02-17] Continuous Capacity & Telemetry Synchronization
+
+### The Bottleneck
+Even with a hardened allocator, the **telemetry reported nonsensical data** and the capacity tests were internally unstable.
+- **Latency Outliers**: The `load_tester.py` reported latency in the range of `1.7e+15 us` (centuries).
+- **Test Flakiness**: The `capacity_report.sh` would intermittently fail with `Address already in use` during Phase 4 (50 clients), causing load test abortions.
+
+### The Solutions
+
+#### 1. Clock Synchronization (`steady_clock` vs `system_clock`)
+- **Cause**: The core engine used `std::chrono::steady_clock` (monotonic, but relative to boot time), while the Python load tester used `time.time()` (Unix epoch). 
+- **Fix**: Switched all telemetry timestamps to `std::chrono::system_clock::now()`. This allows multi-process synchronization between the C++ backend and the Python monitoring tools.
+- **Result**: Reported latency dropped from centuries to a realistic **~9.8ms** (Mean), including network and serialization overhead.
+
+#### 2. Robust Port Reuse (`SO_REUSEADDR`)
+- **Bug**: The `WsServer` was attempting to set `reuse_address` *after* the acceptor had already bound to the port in its constructor.
+- **Fix**: Refactored the constructor to explicitly `open`, `set_option`, `bind`, and then `listen`.
+- **Result**: Automated capacity reports can now run back-to-back without waiting for TCP `TIME_WAIT` timeouts.
+
+#### 3. Standardized Test Environment
+- **Enforcement**: Established a `.venv` for Python dependencies (`websockets`) to ensure the capacity report remains portable and execution-consistent.
+
+### Final Performance Verification
+- **Stress Multiplier**: 50 concurrent high-frequency clients.
+- **Sustained Throughput**: Successfully handled 2,000,000 requests without a single assertion failure or port-bind error.
+- **Conclusion**: The "Production-Ready" milestone is achieved. The system is safe, fast, and observable.

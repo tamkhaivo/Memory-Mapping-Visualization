@@ -8,9 +8,6 @@
 #include <atomic>
 #include <cstddef>
 #include <functional>
-#include <map>
-#include <memory_resource>
-#include <unordered_map>
 #include <vector>
 
 #include "allocator/free_list.hpp"
@@ -81,7 +78,11 @@ public:
     if (++next_event_id_ % sampling_ != 0)
       return;
 
-    BlockMetadata block{.offset = offset, .actual_size = size};
+    BlockMetadata block{
+        .offset = offset,
+        .actual_size = size,
+        .timestamp = std::chrono::system_clock::now(),
+    };
     AllocationEvent event{
         .type = EventType::Deallocate,
         .block = std::move(block),
